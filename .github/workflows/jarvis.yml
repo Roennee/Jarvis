@@ -21,15 +21,43 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: node --check app.js
       - run: bash -n start.sh setup.sh update.sh install-service.sh model-update.sh
+  speech:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y espeak-ng
+      - run: python -m pip install 'faster-whisper>=1.1,<2' 'av==16.1.0'
+      - name: Download public base speech model
+        run: |
+          python - <<'PYTHON'
+          from huggingface_hub import snapshot_download
+          snapshot_download('Systran/faster-whisper-base', local_dir='models/whisper-base')
+          PYTHON
+      - name: Offline German speech round-trip
+        run: |
+          espeak-ng -v de -s 145 -w /tmp/jarvis-test.wav 'Morgen kaufe ich Milch. Danach gehe ich zum Training.'
+          HF_HUB_OFFLINE=1 python transcribe.py /tmp/jarvis-test.wav models/whisper-base > /tmp/transcript.json
+          python - <<'PYTHON'
+          import json
+          text=json.load(open('/tmp/transcript.json'))['text']
+          print(text)
+          assert 'milch' in text.lower(), 'Expected German content was not transcribed'
+          PYTHON
   android:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
