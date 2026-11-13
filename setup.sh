@@ -15,4 +15,7 @@ if not all((path/name).exists() for name in ('model.bin','config.json','tokenize
     snapshot_download('Systran/faster-whisper-base', local_dir=str(path))
 print('Sprachmodell lokal vorhanden. Schweizerdeutsch zunächst mit echten Aufnahmen testen.')
 PY
-echo 'Fertig. Server stoppen und mit bash start.sh neu starten.'
+if command -v ollama >/dev/null 2>&1; then
+    bash setup-model.sh
+fi
+echo 'Fertig. Server stoppen und mit bash start.sh neu starten.' 

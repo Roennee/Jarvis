@@ -23,7 +23,7 @@ bash setup.sh
 bash start.sh
 ```
 
-`setup.sh` installiert lokale Sprachausgabe (eSpeak NG), lokale Transkription (faster-whisper mit Base-Modell) und ICS-Import. Dafür werden beim ersten Lauf Pakete und Modellgewichte heruntergeladen. Danach transkribiert der Worker mit deaktiviertem Netzwerkdownload. Ohne Setup funktionieren Chat, Notizen, Aufgaben, Trainings-/Depotimport und Kalenderplanung weiterhin. Eine fehlende Erweiterung wird im Dashboard angezeigt.
+`setup.sh` installiert lokale Sprachausgabe (eSpeak NG), lokale Transkription (faster-whisper mit Base-Modell) und ICS-Import. Dafür werden beim ersten Lauf Pakete und Modellgewichte heruntergeladen. Danach transkribiert der Worker mit deaktiviertem Netzwerkdownload. Anschliessend lädt `setup-model.sh` den abliterated Kandidaten `huihui_ai/qwen3-abliterated:1.7b` (ca. 1,1 GB) und wählt ihn nur, wenn zwei einfache Antworttests bestehen. Bei fehlgeschlagenen Tests bleibt die alte Auswahl bestehen. Ohne Setup funktionieren Chat, Notizen, Aufgaben, Trainings-/Depotimport und Kalenderplanung weiterhin. Eine fehlende Erweiterung wird im Dashboard angezeigt.
 
 Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliessen und erneut öffnen. Die Datenbank wird erweitert, bestehende Notizen bleiben erhalten.
 
@@ -34,7 +34,7 @@ Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliesse
 - Aufgaben mit Fälligkeit und Erledigt-Status.
 - Mikrofonaufnahme im Browser bis zwei Minuten, Vorschau, lokaler Download und Upload. Audio bleibt nach Upload auf dem Laptop.
 - Lokale Transkription als Hintergrundauftrag. Danach Text prüfen, korrigieren und als Notiz speichern. Original/Korrektur werden aufbewahrt; kein automatisches Sprachtraining.
-- Geräte-TTS nur für Stimmen mit `localService=true`; eSpeak als zuverlässigerer Serverfallback mit Player. Keine Fish-Audio-Anbindung. Fallback klingt synthetisch, keine zugesagte natürliche Wunschstimme.
+- Geräte-TTS nur für Stimmen mit `localService=true`; eSpeak als zuverlässigerer Serverfallback mit Player. Keine Fish-Audio-Anbindung. Fallback klingt synthetisch, keine zugesagte natürliche Wunschstimme. Im synthetischen Sprachtest wurden einzelne Wörter falsch erkannt; Transkripte deshalb immer prüfen, besonders Zeiten, Namen und Schweizerdeutsch.
 - Lokale Termine und Import von Google-/Outlook-ICS-Dateien; wiederkehrende Einträge im Fenster letzte 30 bis nächste 370 Tage. Alle Zeiten werden in Europe/Zurich angezeigt. Wiederimport dedupliziert erkannte Termine, löscht aber keine entfernten Termine. Google/Outlook zusätzlich als Leseadapter nach Kontoeinrichtung (manueller Abruf, keine Schreibaktionen).
 - Training manuell und CSV-Import. Depot-Snapshots als CSV, Historie und Summen je Währung. Keine Livekurse, keine Währungsumrechnung.
 - Bees-JSON-Berichte als unveränderte Momentaufnahmen. Keine direkte Prozess-/Kraken-Anbindung, keine Trades.
@@ -78,7 +78,7 @@ Sichert den bisherigen Modelltag lokal, lädt den gewählten Tag neu und prüft 
 - **Google privat / Outlook geschäftlich:** Leseadapter sind implementiert, brauchen aber OAuth-App-Konfiguration und Kontofreigaben. Noch kein Test gegen persönliche Konten. ICS-Import funktioniert ohne Kontoanmeldung. Siehe `docs/integrations.md`.
 - **Schweizerdeutsch:** Base-Modell und persönliches Glossar sind ein Startpunkt, keine garantierte Dialekterkennung. Korrekturbeispiele können später als Datengrundlage dienen.
 - **Natürlich klingende eigene Stimme:** eSpeak ist der lokale funktionale Fallback; eine bessere Offline-Stimme muss hardwarebezogen getestet werden.
-- **Abliterated-Modell:** Standard-Testmodell bleibt installiert; Auswahl noch offen. Der optionale Update-Timer aktualisiert nur diesen gewählten Tag und nimmt keine neue Modellwahl vor.
+- **Abliterated-Modell:** Kleine huihui-Qwen3-Variante als Installationskandidat vorbereitet; auf dem Nutzer-Laptop noch nicht geprüft. Zwei einfache Setup-Tests ersetzen keine umfassende Qualitätsprüfung. Der optionale Update-Timer aktualisiert nur diesen gewählten Tag und nimmt keine neue Modellwahl vor.
 - **Bees live:** muss an das aktuelle, geprüfte Berichtsschema und die tatsächlichen lokalen Dateien angeschlossen werden.
 
 ## Tests
@@ -88,3 +88,5 @@ python3 -m unittest discover -s tests -v
 ```
 
 Integrationstests verwenden eine temporäre Datenbank und eine simulierte Ollama-Antwort. Sie handeln nicht und rufen keine privaten Dienste auf. Reale Audio-/Dialektqualität und Pixel-Sperrbildschirmverhalten müssen am Gerät getestet werden.
+
+Modellquelle: https://ollama.com/huihui_ai/qwen3-abliterated:1.7b — Community-Variante laut Modellkarte per Abliteration abgeleitet, kein Versprechen über Antwortqualität.
