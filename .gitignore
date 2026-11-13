@@ -10,3 +10,11 @@ backups/
 recordings/
 models/
 *.log
+node_modules/
+playwright-report/
+private/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore
