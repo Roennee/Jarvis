@@ -28,4 +28,4 @@ Uploads erfolgen nur nach Klick. Keine automatischen Uploads nach Sperren oder b
 
 Build, Mikrofonrechte auf Pixel, Start per Kachel, Lock/Unlock, Stop-Benachrichtigung, Netzwerkverlust, Doppelklicks, Uploadgrössen, Verbindung zum aktualisierten Server. Ein App-Update benötigt dieselbe Signatur; Debug-Key nicht bei jedem Build wechseln, falls lokale Aufnahmen erhalten bleiben sollen.
 
-Erster erfolgreicher Build: https://github.com/Roennee/Jarvis/actions/runs/43460004257 — Android-Job erfolgreich; der damalige separate Speech-Genauigkeitstest schlug wegen falsch erkannter Wörter fehl.
+APK-Builds: https://github.com/Roennee/Jarvis/actions/workflows/jarvis.yml — Artefakt `jarvis-recorder-debug`. Kein Gerätetest und keine Produktionssignierung.

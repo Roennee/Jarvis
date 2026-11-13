@@ -29,13 +29,15 @@ jobs:
         with:
           python-version: '3.12'
       - run: sudo apt-get update && sudo apt-get install -y espeak-ng
-      - run: python -m pip install 'faster-whisper>=1.1,<2' 'av==16.1.0'
+      - run: python -m pip install 'faster-whisper>=1.1,<2' 'av==16.1.0' 'piper-tts>=1.5,<2'
       - name: Download public base speech model
         run: |
           python - <<'PYTHON'
           from huggingface_hub import snapshot_download
           snapshot_download('Systran/faster-whisper-base', local_dir='models/whisper-base')
           PYTHON
+      - run: python -m piper.download_voices de_DE-thorsten-medium --data-dir models/piper
+      - run: python tests/speech_roundtrip.py
       - name: Offline German speech round-trip
         run: |
           espeak-ng -v de -s 145 -w /tmp/jarvis-test.wav 'Morgen kaufe ich Milch. Danach gehe ich zum Training.'

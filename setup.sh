@@ -7,6 +7,7 @@ sudo apt-get install -y python3-venv espeak-ng
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 mkdir -p models
+.venv/bin/python -m piper.download_voices de_DE-thorsten-medium --data-dir models/piper
 .venv/bin/python - <<'PY'
 from pathlib import Path
 path=Path('models/whisper-base')

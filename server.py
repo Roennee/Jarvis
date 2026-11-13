@@ -130,6 +130,11 @@ def ollama(path, payload=None, timeout=8):
         return json.load(r)
 
 
+def piper_ready():
+    path=ROOT/'models'/'piper'/'de_DE-thorsten-medium.onnx'
+    return importlib.util.find_spec('piper') is not None and path.is_file() and Path(str(path)+'.json').is_file()
+
+
 def stt_ready():
     return importlib.util.find_spec('faster_whisper') is not None and all((ROOT/'models'/'whisper-base'/name).is_file() for name in ('model.bin','config.json','tokenizer.json'))
 
@@ -142,7 +147,7 @@ def status():
     except (OSError, ValueError):
         online, models = False, []
     return dict(version=VERSION, online=online, models=models, settings=settings(),
-        voice=bool(shutil.which('espeak-ng')), transcription=stt_ready(),
+        voice=piper_ready() or bool(shutil.which('espeak-ng')), voice_engine='piper' if piper_ready() else 'espeak' if shutil.which('espeak-ng') else 'missing', transcription=stt_ready(),
         calendar_import=importlib.util.find_spec('icalendar') is not None and importlib.util.find_spec('recurring_ical_events') is not None,
         remote=REMOTE, timezone='Europe/Zurich', csrf=CSRF, calendars={'google': (DATA/'private'/'google-token.json').exists(), 'microsoft': (DATA/'private'/'microsoft-cache.json').exists()})
 
@@ -390,10 +395,22 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT OR REPLACE INTO settings VALUES(?,?)',(k,json.dumps(v)))
             return self.send({'ok':True})
         if path == '/api/voice':
+            speech = text(b,'text',6000)
+            if piper_ready():
+                if not MODEL_LOCK.acquire(blocking=False):
+                    return self.send({'error':'Lokale KI ist beschäftigt. Vorlesen später erneut starten.'},code=409)
+                try:
+                    with tempfile.TemporaryDirectory(prefix='jarvis-voice-') as directory:
+                        output=Path(directory)/'speech.wav'
+                        result=subprocess.run([sys.executable,'-m','piper','-m',str(ROOT/'models'/'piper'/'de_DE-thorsten-medium.onnx'),'-f',str(output),'--length-scale','1.1','--',speech],capture_output=True,timeout=90)
+                        if result.returncode or not output.is_file():
+                            raise ValueError('Lokale Piper-Stimme fehlgeschlagen. Installation prüfen.')
+                        return self.send(output.read_bytes(),'audio/wav')
+                finally:
+                    MODEL_LOCK.release()
             binary = shutil.which('espeak-ng')
             if not binary:
                 return self.send({'error':'Lokale Serverstimme fehlt. Auf dem Laptop: bash setup.sh'}, code=409)
-            speech = text(b,'text',6000)
             result = subprocess.run([binary,'-v','de','-s','145','--stdout','--stdin'],input=speech.encode(),capture_output=True,timeout=45)
             if result.returncode:
                 raise ValueError('Stimme konnte nicht erzeugt werden')
