@@ -55,6 +55,8 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
+        self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],4)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -131,6 +133,17 @@ class WorkspaceTests(unittest.TestCase):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
         exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.4.0')
+
+    def test_local_bees_allowlist(self):
+        previous=self.app.BEES_ROOT
+        try:
+            self.app.BEES_ROOT=Path(self.tmp.name)/'trading'
+            target=self.app.BEES_ROOT/'data'/'live_bees'/'state.json';target.parent.mkdir(parents=True)
+            target.write_text(json.dumps({'capital_eur':'1000','pending':None,'api_key':'TOPSECRET','bees':{'trend':{'last_equity':'330.20','fees_eur':'1.23','secret':'TOPSECRET'}}}))
+            d=self.data('/api/bees/local')
+            self.assertTrue(d['available']);self.assertEqual(d['agents'][0]['saved_equity_eur'],'330.20')
+            self.assertNotIn('TOPSECRET',json.dumps(d))
+        finally:self.app.BEES_ROOT=previous
 
     def test_optional_ics(self):
         if not self.data('/api/status')['calendar_import']:self.skipTest('ICS dependencies not installed')

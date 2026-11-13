@@ -46,6 +46,7 @@ CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
 VERSION = '0.4.0'
+BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
 def connect():
@@ -56,6 +57,11 @@ def connect():
 
 
 def init():
+    if DB.exists():
+        with connect() as previous:
+            old_version=previous.execute('PRAGMA user_version').fetchone()[0]
+        if old_version < 4:
+            backup()
     with connect() as c:
         c.executescript('''
         PRAGMA journal_mode=WAL;
@@ -72,6 +78,7 @@ def init():
         CREATE TABLE IF NOT EXISTS imports(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP);
         ''')
         c.execute("UPDATE recordings SET status='interrupted',error='Verarbeitung unterbrochen. Aufnahme kann erneut transkribiert werden.' WHERE status IN ('queued','processing')")
+        c.execute('PRAGMA user_version=4')
 
 
 def rows(sql, args=()):
@@ -138,6 +145,33 @@ def status():
         voice=bool(shutil.which('espeak-ng')), transcription=stt_ready(),
         calendar_import=importlib.util.find_spec('icalendar') is not None and importlib.util.find_spec('recurring_ical_events') is not None,
         remote=REMOTE, timezone='Europe/Zurich', csrf=CSRF, calendars={'google': (DATA/'private'/'google-token.json').exists(), 'microsoft': (DATA/'private'/'microsoft-cache.json').exists()})
+
+
+def local_bees():
+    # Read exact saved ledger fields; never import/execute trading code or read secrets.
+    path = BEES_ROOT/'data'/'live_bees'/'state.json'
+    if not path.is_file():
+        return {'available':False,'note':'Kein gespeicherter Live-Bees-Zustand im konfigurierten Trading-Ordner gefunden.'}
+    if path.stat().st_size > 10_000_000:
+        raise ValueError('Bees-Zustandsdatei zu gross')
+    state = json.loads(path.read_text())
+    if not isinstance(state,dict) or not isinstance(state.get('bees'),dict):
+        raise ValueError('Bees-Zustandsformat nicht erkannt')
+    from decimal import Decimal,InvalidOperation
+    def amount(v):
+        try:
+            d=Decimal(str(v))
+            return str(d) if d.is_finite() else None
+        except (InvalidOperation,ValueError):return None
+    agents=[]
+    for name in ('trend','rebound','adaptive','parrondo'):
+        b=state['bees'].get(name)
+        if not isinstance(b,dict):continue
+        agents.append({'name':name,'saved_equity_eur':amount(b.get('last_equity')),'paid_fees_eur':amount(b.get('fees_eur'))})
+    return {'available':True,'saved_file_time':datetime.fromtimestamp(path.stat().st_mtime,timezone.utc).isoformat(),
+            'capital_eur':amount(state.get('capital_eur')),'agents':agents,
+            'pending':bool(state['pending']) if 'pending' in state else None,
+            'note':'Nur gespeicherte Bewertungen, keine aktuellen Börsenkurse. Gebühren nicht nochmals abziehen. AI-Kosten nicht enthalten. Watcherstatus wird nicht daraus abgeleitet.'}
 
 
 def backup():
@@ -269,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM holdings ORDER BY id DESC LIMIT 3000'))
             if path == '/api/recordings':
                 return self.send(rows('SELECT * FROM recordings ORDER BY created DESC,rowid DESC LIMIT 100'))
+            if path == '/api/bees/local':
+                return self.send(local_bees())
             if path == '/api/bees':
                 return self.send(rows("SELECT * FROM imports WHERE kind='bees' ORDER BY id DESC LIMIT 20"))
             if path == '/api/export':

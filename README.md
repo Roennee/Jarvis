@@ -25,7 +25,7 @@ bash start.sh
 
 `setup.sh` installiert lokale Sprachausgabe (eSpeak NG), lokale Transkription (faster-whisper mit Base-Modell) und ICS-Import. Dafür werden beim ersten Lauf Pakete und Modellgewichte heruntergeladen. Danach transkribiert der Worker mit deaktiviertem Netzwerkdownload. Anschliessend lädt `setup-model.sh` den abliterated Kandidaten `huihui_ai/qwen3-abliterated:1.7b` (ca. 1,1 GB) und wählt ihn nur, wenn zwei einfache Antworttests bestehen. Bei fehlgeschlagenen Tests bleibt die alte Auswahl bestehen. Ohne Setup funktionieren Chat, Notizen, Aufgaben, Trainings-/Depotimport und Kalenderplanung weiterhin. Eine fehlende Erweiterung wird im Dashboard angezeigt.
 
-Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliessen und erneut öffnen. Die Datenbank wird erweitert, bestehende Notizen bleiben erhalten.
+Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliessen und erneut öffnen. Vor der ersten Schemaerweiterung wird die bestehende Datenbank automatisch gesichert. Die Datenbank wird erweitert, bestehende Notizen bleiben erhalten.
 
 ## Was funktioniert
 
@@ -37,7 +37,7 @@ Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliesse
 - Geräte-TTS nur für Stimmen mit `localService=true`; eSpeak als zuverlässigerer Serverfallback mit Player. Keine Fish-Audio-Anbindung. Fallback klingt synthetisch, keine zugesagte natürliche Wunschstimme. Im synthetischen Sprachtest wurden einzelne Wörter falsch erkannt; Transkripte deshalb immer prüfen, besonders Zeiten, Namen und Schweizerdeutsch.
 - Lokale Termine und Import von Google-/Outlook-ICS-Dateien; wiederkehrende Einträge im Fenster letzte 30 bis nächste 370 Tage. Alle Zeiten werden in Europe/Zurich angezeigt. Wiederimport dedupliziert erkannte Termine, löscht aber keine entfernten Termine. Google/Outlook zusätzlich als Leseadapter nach Kontoeinrichtung (manueller Abruf, keine Schreibaktionen).
 - Training manuell und CSV-Import. Depot-Snapshots als CSV, Historie und Summen je Währung. Keine Livekurse, keine Währungsumrechnung.
-- Bees-JSON-Berichte als unveränderte Momentaufnahmen. Keine direkte Prozess-/Kraken-Anbindung, keine Trades.
+- Bees liest gespeicherte Equity-/Gebühren-/Kapitalfelder aus `~/trading-experiment/data/live_bees/state.json`, ohne Trading-Code auszuführen. Nur ausgewählte Felder werden angezeigt; kein Schlüsselzugriff. Optionaler Pfad per `JARVIS_BEES_DIR`. Zusätzliche JSON-Berichte bleiben als Momentaufnahmen erhalten. Keine Kraken-Anbindung oder Trades.
 - SQLite-Onlinebackup und Datenexport als JSON. Die Audio-Dateien sind im JSON-Export nicht enthalten.
 - Konfiguration des installierten Ollama-Modells. CPU-intensive KI-Aufgaben werden serialisiert.
 
@@ -74,12 +74,12 @@ Sichert den bisherigen Modelltag lokal, lädt den gewählten Tag neu und prüft 
 
 ## Noch nicht fertig / benötigt Einrichtung
 
-- **Native Pixel-Aufnahme aus dem Sperrbildschirm:** Android-MVP-Quellcode unter `android/` mit Kachel, Foreground-Service und lokalem Upload. Noch kein erfolgreicher APK-Build oder Gerätetest. Kachel fordert bei Bedarf Entsperren an. Webaufnahme ersetzt die App nicht.
+- **Native Pixel-Aufnahme aus dem Sperrbildschirm:** Android-MVP-Quellcode unter `android/` mit Kachel, Foreground-Service und lokalem Upload. APK-Build in GitHub Actions erfolgreich; noch kein Gerätetest. Kachel fordert bei Bedarf Entsperren an. Webaufnahme ersetzt die App nicht.
 - **Google privat / Outlook geschäftlich:** Leseadapter sind implementiert, brauchen aber OAuth-App-Konfiguration und Kontofreigaben. Noch kein Test gegen persönliche Konten. ICS-Import funktioniert ohne Kontoanmeldung. Siehe `docs/integrations.md`.
 - **Schweizerdeutsch:** Base-Modell und persönliches Glossar sind ein Startpunkt, keine garantierte Dialekterkennung. Korrekturbeispiele können später als Datengrundlage dienen.
 - **Natürlich klingende eigene Stimme:** eSpeak ist der lokale funktionale Fallback; eine bessere Offline-Stimme muss hardwarebezogen getestet werden.
 - **Abliterated-Modell:** Kleine huihui-Qwen3-Variante als Installationskandidat vorbereitet; auf dem Nutzer-Laptop noch nicht geprüft. Zwei einfache Setup-Tests ersetzen keine umfassende Qualitätsprüfung. Der optionale Update-Timer aktualisiert nur diesen gewählten Tag und nimmt keine neue Modellwahl vor.
-- **Bees live:** muss an das aktuelle, geprüfte Berichtsschema und die tatsächlichen lokalen Dateien angeschlossen werden.
+- **Bees:** Leseadapter für die verifizierten Felder des aktuellen Repositoryschemas ist vorbereitet; reale lokale Datei am Surface noch zu prüfen. Keine neue Bewertung, kein Watcherstatus, kein Trading-Zugriff.
 
 ## Tests
 

@@ -11,7 +11,7 @@ cd android
 gradle :app:assembleDebug
 ```
 
-APK: `app/build/outputs/apk/debug/app-debug.apk`. Erstinstallation einer Debug-App muss am Pixel bewusst zugelassen werden. Kein Play-Store-Release, keine Produktionssignierung. Nicht als getestete APK ausgeben, bevor der Build und Gerätetest erfolgt sind.
+APK: `app/build/outputs/apk/debug/app-debug.apk`. Erstinstallation einer Debug-App muss am Pixel bewusst zugelassen werden. Kein Play-Store-Release, keine Produktionssignierung. APK wurde in GitHub Actions kompiliert; Aufnahme, Sperrbildschirm und Upload sind am Pixel noch zu prüfen.
 
 ## Einrichtung
 
@@ -27,3 +27,5 @@ Uploads erfolgen nur nach Klick. Keine automatischen Uploads nach Sperren oder b
 ## Testbedarf
 
 Build, Mikrofonrechte auf Pixel, Start per Kachel, Lock/Unlock, Stop-Benachrichtigung, Netzwerkverlust, Doppelklicks, Uploadgrössen, Verbindung zum aktualisierten Server. Ein App-Update benötigt dieselbe Signatur; Debug-Key nicht bei jedem Build wechseln, falls lokale Aufnahmen erhalten bleiben sollen.
+
+Erster erfolgreicher Build: https://github.com/Roennee/Jarvis/actions/runs/43460004257 — Android-Job erfolgreich; der damalige separate Speech-Genauigkeitstest schlug wegen falsch erkannter Wörter fehl.

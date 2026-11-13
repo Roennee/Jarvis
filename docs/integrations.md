@@ -54,3 +54,7 @@ Die Adapter sind im Repository vorhanden; sie wurden mit simulierten API-Antwort
 4. „Kalender → Outlook abrufen“. Es wird nur der Standardkalender gelesen, inklusive Wiederholungsinstanzen. Kein Zurückschreiben.
 
 Die Tokens liegen mit Dateirechten 0600 unter `private/`; sie sind nicht zusätzlich verschlüsselt. Der Benutzerzugang und die Datenträgerverschlüsselung schützen sie. `private/` ist von Git und JSON-Export ausgeschlossen. OAuth-Konfiguration und Anmeldung sind noch vom Nutzer vorzunehmen. Token-Refresh erfolgt bei einem Abruf, kein Hintergrund-Polling. Externe Abrufe übertragen technisch notwendige Anfrage-/Kontodaten an Google/Microsoft; Modell und Notizverarbeitung bleiben lokal.
+
+## Ergänzung: direkter Bees-Leseadapter
+
+Nach Prüfung von `live_bees.py` und `live_experiment_report.py` im Trading-Repository liest Jarvis jetzt ausschliesslich `data/live_bees/state.json` unter `~/trading-experiment` (alternativ Umgebungsvariable `JARVIS_BEES_DIR`). Es werden nur `capital_eur`, die gespeicherten `last_equity`-/`fees_eur`-Werte der bekannten Bees und das Vorhandensein von Pending angezeigt. Unbekannte Beträge bleiben unbekannt. Keine Imports des Trading-Codes, keine Subprozesse, keine Kurs-/Kontenabfragen, kein Zugriff auf Konfigurationsdateien oder Schlüssel. Der Dateizeitpunkt sagt nicht, ob der Watcher läuft oder ob die Marktpreise aktuell sind. Adapter mit synthetischer Datei auf Feldauswahl und Secret-Ausschluss getestet; echte Surface-Datei noch nicht verfügbar.
