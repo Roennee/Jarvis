@@ -53,10 +53,38 @@ class WorkspaceTests(unittest.TestCase):
     def data(self,path,body=None):
         status,data,_=self.req(path,body);self.assertEqual(status,200,data);return json.loads(data)
 
+    def test_protocol_review_archive_and_reanalysis(self):
+        from unittest.mock import patch
+        task={'body':'Mischa anrufen','owner':'Raffa','due':'morgen','evidence':'Mischa anrufen'}
+        analysis={'title':'Abstimmung','category':'Arbeit','summary':'Anruf vereinbart','key_points':[], 'decisions':[], 'open_questions':[], 'tasks':[task]}
+        with patch.object(self.app,'ollama',return_value={'message':{'content':json.dumps(analysis)}}):
+            nid=self.data('/api/protocols',{'text':'Mischa anrufen'})['id']
+        self.data('/api/notes/update',{'id':nid,'title':'Projekt','category':'Privat','pinned':True})
+        note=next(n for n in self.data('/api/notes?q=Projekt') if n['id']==nid)
+        self.assertEqual(note['category'],'Privat');self.assertTrue(note['pinned'])
+        payload={'note_id':nid,'position':0,'body':'Mischa wegen Sorter anrufen','owner':'Raffa','due':'2026-11-20'}
+        self.data('/api/protocols/task',payload)
+        self.data('/api/protocols/task',payload)
+        with self.app.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM note_tasks WHERE note_id=?',(nid,)).fetchone()[0],1)
+            tid=c.execute('SELECT task_id FROM note_tasks WHERE note_id=?',(nid,)).fetchone()[0]
+            self.assertEqual(c.execute('SELECT due FROM tasks WHERE id=?',(tid,)).fetchone()[0],'2026-11-20')
+            changed={**analysis,'tasks':[{'body':'Andere Aufgabe','owner':'','due':'','evidence':'Andere Aufgabe'},task]}
+            c.execute('UPDATE notes SET analysis=? WHERE id=?',(json.dumps(changed),nid))
+        self.data('/api/protocols/task',{**payload,'position':1})
+        with self.app.connect() as c:
+            self.assertEqual(c.execute('SELECT count(*) FROM note_tasks WHERE note_id=?',(nid,)).fetchone()[0],1)
+        self.data('/api/notes/update',{'id':nid,'archived':True})
+        self.assertFalse(any(n['id']==nid for n in self.data('/api/notes')))
+        self.assertTrue(any(n['id']==nid for n in self.data('/api/notes?archived=1')))
+        self.data('/api/notes/update',{'id':nid,'archived':False})
+        self.assertEqual(self.req('/api/notes/update',{'id':nid,'title':'X','category':'Invalid'})[0],400)
+        self.assertEqual(self.req('/api/protocols/task',{**payload,'due':'not-a-date','position':0})[0],400)
+
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],5)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],6)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -132,7 +160,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.5.0')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.5.1')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT

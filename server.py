@@ -45,7 +45,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.5.0'
+VERSION = '0.5.1'
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -60,7 +60,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 5:
+        if old_version < 6:
             backup()
     with connect() as c:
         c.executescript('''
@@ -77,14 +77,24 @@ def init():
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS imports(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP);
         ''')
-        c.execute("UPDATE recordings SET status='interrupted',error='Verarbeitung unterbrochen. Aufnahme kann erneut transkribiert werden.' WHERE status IN ('queued','processing')")
+        c.execute("UPDATE recordings SET status='interrupted',error='Verarbeitung unterbrochen. Aufnahme kann erneut transkribiert werden.' WHERE status IN ('queued','processing','analyzing')")
         columns = {r[1] for r in c.execute('PRAGMA table_info(notes)')}
-        for name, definition in [('title', "TEXT DEFAULT ''"), ('category', "TEXT DEFAULT 'Allgemein'"), ('analysis', "TEXT DEFAULT '{}'"), ('recording_id', 'TEXT')]:
+        for name, definition in [('title', "TEXT DEFAULT ''"), ('category', "TEXT DEFAULT 'Allgemein'"), ('analysis', "TEXT DEFAULT '{}'"), ('recording_id', 'TEXT'), ('archived', 'INTEGER DEFAULT 0'), ('pinned', 'INTEGER DEFAULT 0')]:
             if name not in columns:
                 c.execute(f'ALTER TABLE notes ADD COLUMN {name} {definition}')
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS note_recording ON notes(recording_id) WHERE recording_id IS NOT NULL')
         c.execute('CREATE TABLE IF NOT EXISTS note_tasks(note_id INTEGER, position INTEGER, task_id INTEGER, UNIQUE(note_id,position))')
-        c.execute('PRAGMA user_version=5')
+        task_columns={r[1] for r in c.execute('PRAGMA table_info(note_tasks)')}
+        if 'signature' not in task_columns:
+            c.execute("ALTER TABLE note_tasks ADD COLUMN signature TEXT DEFAULT ''")
+            for link in c.execute('SELECT note_id,position FROM note_tasks').fetchall():
+                note=c.execute('SELECT analysis FROM notes WHERE id=?',(link[0],)).fetchone()
+                try:
+                    task=json.loads(note[0])['tasks'][link[1]]
+                    c.execute('UPDATE note_tasks SET signature=? WHERE note_id=? AND position=?',(task_signature(task),*link))
+                except (TypeError,KeyError,IndexError,ValueError):
+                    pass
+        c.execute('PRAGMA user_version=6')
 
 
 def rows(sql, args=()):
@@ -266,6 +276,10 @@ def summarize_transcript(transcript):
     return clean
 
 
+def task_signature(task):
+    return hashlib.sha256(json.dumps({k:task.get(k,'') for k in ('body','owner','due','evidence')},sort_keys=True,ensure_ascii=False).encode()).hexdigest()
+
+
 def save_protocol(transcript, analysis, rid=None):
     with connect() as c:
         if rid:
@@ -298,12 +312,14 @@ def recording_worker():
                     raise RuntimeError('Lokale Transkription fehlgeschlagen. Aufnahme bleibt erhalten. Installation und Sprachmodell prüfen.')
                 transcript = json.loads(result.stdout.strip().splitlines()[-1])['text']
                 with connect() as c:
-                    c.execute("UPDATE recordings SET status='done',transcript=?,error='' WHERE id=?", (transcript, rid))
+                    c.execute("UPDATE recordings SET status='analyzing',transcript=?,error='' WHERE id=?", (transcript, rid))
                 try:
                     save_protocol(transcript, summarize_transcript(transcript), rid)
+                    with connect() as c:
+                        c.execute("UPDATE recordings SET status='done' WHERE id=?",(rid,))
                 except Exception:
                     with connect() as c:
-                        c.execute("UPDATE recordings SET error='Transkript fertig; KI-Protokoll noch nicht erstellt. Analyse manuell erneut versuchen.' WHERE id=?",(rid,))
+                        c.execute("UPDATE recordings SET status='done',error='Transkript fertig; KI-Protokoll noch nicht erstellt. Analyse manuell erneut versuchen.' WHERE id=?",(rid,))
         except Exception as e:
             with connect() as c:
                 c.execute("UPDATE recordings SET status='error',error=? WHERE id=?", (str(e)[:500], rid))
@@ -349,7 +365,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(status())
             if path == '/api/notes':
                 term = q.get('q', [''])[0][:200]
-                return self.send(rows('SELECT * FROM notes WHERE (body || title || category || analysis) LIKE ? ORDER BY id DESC LIMIT 500', ('%'+term+'%',)))
+                archived=1 if q.get('archived',['0'])[0]=='1' else 0
+                notes=rows('SELECT * FROM notes WHERE archived=? AND (body || title || category || analysis) LIKE ? ORDER BY pinned DESC,id DESC LIMIT 500', (archived,'%'+term+'%'))
+                links=rows('SELECT note_id,signature FROM note_tasks')
+                for note in notes:
+                    note['imported_tasks']=[r['signature'] for r in links if r['note_id']==note['id']]
+                    analysis=json.loads(note['analysis'] or '{}')
+                    note['task_signatures']=[task_signature(t) for t in analysis.get('tasks',[])]
+                return self.send(notes)
             if path == '/api/tasks':
                 return self.send(rows('SELECT * FROM tasks ORDER BY done,due="",due,id DESC LIMIT 1000'))
             if path == '/api/chats':
@@ -423,27 +446,61 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send({'error':'Lokale KI beschäftigt. Bitte erneut versuchen.'},code=409)
             try:
                 analysis=summarize_transcript(transcript)
-                nid=save_protocol(transcript,analysis,rid)
+                if b.get('note_id') is not None:
+                    nid=int(b['note_id'])
+                    with connect() as c:
+                        cur=c.execute('UPDATE notes SET body=?,title=?,category=?,analysis=? WHERE id=?',(transcript,analysis['title'],analysis['category'],json.dumps(analysis,ensure_ascii=False),nid))
+                        if not cur.rowcount: raise ValueError('Notiz fehlt')
+                else:
+                    nid=save_protocol(transcript,analysis,rid)
                 return self.send({'ok':True,'id':nid})
             finally:
                 MODEL_LOCK.release()
         if path == '/api/protocols/task':
             nid=int(b['note_id']); position=int(b['position'])
             with connect() as c:
+                c.execute('BEGIN IMMEDIATE')
                 note=c.execute('SELECT analysis FROM notes WHERE id=?',(nid,)).fetchone()
                 if not note: raise ValueError('Protokoll fehlt')
                 tasks=json.loads(note[0]).get('tasks',[])
                 if position < 0 or position >= len(tasks): raise ValueError('Aufgabe fehlt')
-                existing=c.execute('SELECT task_id FROM note_tasks WHERE note_id=? AND position=?',(nid,position)).fetchone()
-                if existing: return self.send({'ok':True,'id':existing[0]})
                 t=tasks[position]
-                body=t['body'] + (' · Verantwortlich: '+t['owner'] if t['owner'] else '') + (' · Termin: '+t['due'] if t['due'] else '')
-                cur=c.execute('INSERT INTO tasks(body) VALUES(?)',(body,))
-                c.execute('INSERT INTO note_tasks VALUES(?,?,?)',(nid,position,cur.lastrowid))
+                signature=task_signature(t)
+                existing=c.execute('SELECT task_id FROM note_tasks WHERE note_id=? AND signature=?',(nid,signature)).fetchone()
+                if existing: return self.send({'ok':True,'id':existing[0]})
+                body=text(b,'body',1000) if 'body' in b else t['body']
+                owner=text(b,'owner',200,False) if 'owner' in b else t['owner']
+                due=text(b,'due',40,False)
+                if due: day(due)
+                body += (' · Verantwortlich: '+owner if owner else '')
+                if t['due'] and not due: body += ' · Terminhinweis: '+t['due']
+                cur=c.execute('INSERT INTO tasks(body,due) VALUES(?,?)',(body,due))
+                # Positions in an analysis may change when it is regenerated.
+                slot=c.execute('SELECT COALESCE(MAX(position),-1)+1 FROM note_tasks WHERE note_id=?',(nid,)).fetchone()[0]
+                c.execute('INSERT INTO note_tasks(note_id,position,task_id,signature) VALUES(?,?,?,?)',(nid,slot,cur.lastrowid,signature))
+            return self.send({'ok':True})
+        if path == '/api/notes/update':
+            nid=int(b['id'])
+            with connect() as c:
+                if not c.execute('SELECT id FROM notes WHERE id=?',(nid,)).fetchone():
+                    raise ValueError('Notiz fehlt')
+                for key in ('archived','pinned'):
+                    if key in b:
+                        if not isinstance(b[key],bool): raise ValueError('Ungültiger Status')
+                        c.execute(f'UPDATE notes SET {key}=? WHERE id=?',(int(b[key]),nid))
+                if 'title' in b:
+                    title=text(b,'title',200,False)
+                    category=text(b,'category',80)
+                    if category not in ('Arbeit','Studium','Training','Investieren','Privat','Allgemein'):
+                        raise ValueError('Ungültiges Thema')
+                    c.execute('UPDATE notes SET title=?,category=? WHERE id=?',(title,category,nid))
             return self.send({'ok':True})
         if path == '/api/notes':
             with connect() as c:
-                cur = c.execute('INSERT INTO notes(body) VALUES(?)',(text(b,'body'),))
+                category=text(b,'category',80,False) or 'Allgemein'
+                if category not in ('Arbeit','Studium','Training','Investieren','Privat','Allgemein'):
+                    raise ValueError('Ungültiges Thema')
+                cur = c.execute('INSERT INTO notes(body,title,category) VALUES(?,?,?)',(text(b,'body'),text(b,'title',200,False),category))
             return self.send({'ok':True,'id':cur.lastrowid})
         if path == '/api/tasks':
             due = text(b,'due',40,False)
@@ -519,7 +576,7 @@ class Handler(BaseHTTPRequestHandler):
             if not stt_ready():
                 return self.send({'error':'Transkription noch nicht installiert. Aufnahme ist gespeichert. Auf dem Laptop: bash setup.sh'},code=409)
             with connect() as c:
-                pending = c.execute("SELECT COUNT(*) FROM recordings WHERE status IN ('queued','processing')").fetchone()[0]
+                pending = c.execute("SELECT COUNT(*) FROM recordings WHERE status IN ('queued','processing','analyzing')").fetchone()[0]
                 if pending:
                     return self.send({'error':'Eine Aufnahme wird schon verarbeitet. Bitte warten.'},code=409)
                 c.execute("UPDATE recordings SET status='queued',error='' WHERE id=?",(rid,))
@@ -536,7 +593,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not c.execute('SELECT id FROM notes WHERE recording_id=?',(rid,)).fetchone():
                     c.execute('INSERT INTO notes(body,recording_id) VALUES(?,?)',(corrected,rid))
                 else:
-                    c.execute('UPDATE notes SET body=? WHERE recording_id=?',(corrected,rid))
+                    c.execute("UPDATE notes SET body=?,analysis='{}' WHERE recording_id=?",(corrected,rid))
             return self.send({'ok':True})
         if path == '/api/events':
             begin,end = local_time(text(b,'start',80)),local_time(text(b,'end',80))
