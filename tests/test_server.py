@@ -56,7 +56,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],4)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],5)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -132,7 +132,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.4.0')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.5.0')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT
@@ -152,3 +152,26 @@ class WorkspaceTests(unittest.TestCase):
         before=len(self.data('/api/events'));self.data('/api/calendar/import',{'source':'Google-Import','content':ics});self.assertEqual(len(self.data('/api/events')),before)
 
 if __name__=='__main__':unittest.main()
+
+
+class ProtocolTests(unittest.TestCase):
+    def test_analysis_evidence_and_idempotent_storage(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.dict(os.environ, {'JARVIS_DATA_DIR':tmp}):
+                spec=importlib.util.spec_from_file_location('protocol_test',Path(__file__).resolve().parents[1]/'server.py')
+                app=importlib.util.module_from_spec(spec);spec.loader.exec_module(app);app.init()
+                transcript='Mischa anrufen. Termin offen.'
+                output={'title':'Sorter','summary':'Anruf geplant','category':'Arbeit','tasks':[
+                    {'body':'Anrufen','owner':'','due':'','evidence':'Mischa anrufen'},
+                    {'body':'Erfundene Aufgabe','evidence':'nicht im Text'}]}
+                with patch.object(app,'ollama',return_value={'message':{'content':json.dumps(output)}}):
+                    analysis=app.summarize_transcript(transcript)
+                self.assertEqual(len(analysis['tasks']),1)
+                a=app.save_protocol(transcript,analysis,'a'*32)
+                b=app.save_protocol(transcript,analysis,'a'*32)
+                self.assertEqual(a,b)
+                self.assertEqual(len(app.rows('SELECT * FROM notes')),1)
+                self.assertEqual(app.rows('SELECT * FROM tasks'),[])
+                with patch.object(app,'ollama',return_value={'message':{'content':'{}'}}):
+                    with self.assertRaises(ValueError):app.summarize_transcript(transcript)

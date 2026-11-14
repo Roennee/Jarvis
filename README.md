@@ -92,3 +92,9 @@ Integrationstests verwenden eine temporäre Datenbank und eine simulierte Ollama
 Modellquelle: https://ollama.com/huihui_ai/qwen3-abliterated:1.7b — Community-Variante laut Modellkarte per Abliteration abgeleitet, kein Versprechen über Antwortqualität.
 
 Optionaler echter Sprach-Pipelinetest nach Setup: `.venv/bin/python tests/speech_roundtrip.py`. Er erzeugt synthetisches Deutsch mit Piper, lädt die WAV lokal hoch, verarbeitet sie mit dem Offline-Whisper-Worker und speichert das Transkript in einer temporären Testdatenbank. Kein Test persönlicher Aufnahmen.
+
+
+## v0.5: Gesprächsprotokolle
+Nach der lokalen Transkription erzeugt Ollama automatisch ein Protokoll unter Notizen & Protokolle: Titel, Themenkategorie, Zusammenfassung, wichtige Punkte, Entscheidungen, offene Fragen und Aufgabenvorschläge mit Quellzitat. Originaltranskripte bleiben erhalten. Aufgaben werden einzeln übernommen; erneutes Tippen legt dieselbe Aufgabe nicht doppelt an. Termine und Verantwortliche bleiben Textangaben und werden nicht als bestätigte Kalenderdaten behandelt.
+
+Die automatische Analyse benötigt das konfigurierte lokale Modell. Bei Fehlern bleibt das Transkript erhalten; über Transkript prüfen lässt sich die Analyse wiederholen. Maximal 10000 Zeichen pro Analyse. Die inhaltliche Qualität und Laufzeit des kleinen Modells müssen auf dem Surface geprüft werden. Die bestehende Android-App benötigt für diese Serverfunktionen kein neues APK.
