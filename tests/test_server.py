@@ -81,10 +81,21 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.req('/api/notes/update',{'id':nid,'title':'X','category':'Invalid'})[0],400)
         self.assertEqual(self.req('/api/protocols/task',{**payload,'due':'not-a-date','position':0})[0],400)
 
+    def test_voice_action_execution_is_idempotent(self):
+        from unittest.mock import patch
+        rid=self.data('/api/recordings',{'mime':'audio/wav','audio':base64.b64encode(b'RIFFtest').decode(),'mode':'silent'})['id']
+        with patch.object(self.app,'decide_voice',return_value={'action':'calendar','title':'Training','start':'2026-11-16T14:00:00+01:00','end':'2026-11-16T14:30:00+01:00','default_duration':True,'reply':'ignored'}):
+            first=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')
+            second=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')
+        self.assertEqual(first['event_id'],second['event_id']);self.assertEqual(first['reply'],'')
+        self.assertEqual(self.data('/api/voice/result?id='+rid)['result']['event_id'],first['event_id'])
+        self.assertEqual(len([e for e in self.data('/api/events') if e['id']==first['event_id']]),1)
+        self.assertEqual(self.req('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'untrusted'})[0],400)
+
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],6)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],7)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -160,7 +171,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.5.1')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.6.0')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT

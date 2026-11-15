@@ -101,3 +101,7 @@ Die automatische Analyse benötigt das konfigurierte lokale Modell. Bei Fehlern 
 
 ### v0.5.1: Ablage und Aufgabenprüfung
 Titel und Themen können bearbeitet, Einträge angeheftet und archiviert beziehungsweise wiederhergestellt werden. Protokolle lassen sich kopieren. Aufgaben werden vor der Übernahme mit Text, verantwortlicher Person und einem explizit ausgewählten Datum geprüft. Quellzitate bleiben sichtbar. Wiederholte Übernahme bleibt auch dann ohne Duplikat, wenn eine erneute Analyse die Reihenfolge der Vorschläge verändert. Die Oberfläche zeigt die KI-Analyse als eigenen Verarbeitungsstatus.
+
+
+## v0.6: Sprachaktionen (Android-Prototyp v0.2)
+Zwei explizit gestartete Mikrofon-Sitzungen: lokales englisches Hey-Jarvis-Wakeword und stilles Mitschreiben. Neue Sprachdateien werden nach Offline-Transkription als Notiz, lokaler Termin, Antwort oder keine Aktion verarbeitet. Stiller Modus erzeugt keine Audioantwort. Ausgeführte Aktionen sind je Aufnahme idempotent. Unklare Terminangaben landen als Klärungsnotiz. Mehr unter `android/README.md`. Server-Update allein aktualisiert die APK nicht. Gerätetest und Akkumessung stehen aus.

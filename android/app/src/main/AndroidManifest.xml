@@ -5,12 +5,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <application android:label="Jarvis Recorder" android:icon="@drawable/ic_mic" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false">
+    <application android:label="Jarvis" android:icon="@drawable/ic_mic" android:theme="@android:style/Theme.Material.NoActionBar" android:allowBackup="false" android:usesCleartextTraffic="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
+        <activity android:name=".ListeningActivity" android:exported="false" android:showWhenLocked="true"/>
+        <service android:name=".ListeningService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".RecorderService" android:exported="false" android:foregroundServiceType="microphone"/>
-        <service android:name=".RecordTile" android:label="Jarvis aufnehmen" android:icon="@drawable/ic_mic" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true">
+        <service android:name=".RecordTile" android:label="Jarvis still zuhören" android:icon="@drawable/ic_mic" android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" android:exported="true">
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
         </service>
     </application>

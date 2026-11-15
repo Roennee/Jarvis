@@ -18,6 +18,7 @@ public class RecorderService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&"stop".equals(intent.getAction())){finish();return START_NOT_STICKY;}
         if(recording)return START_NOT_STICKY;
+        if(ListeningService.active){status="Zuerst Zuhörmodus stoppen";stopSelf();return START_NOT_STICKY;}
         try{
             NotificationManager manager=getSystemService(NotificationManager.class);
             manager.createNotificationChannel(new NotificationChannel("recording","Jarvis Aufnahme",NotificationManager.IMPORTANCE_LOW));

@@ -22,16 +22,27 @@ public class MainActivity extends Activity {
     private EditText address;
     private TextView status;
     private boolean wantsRecord=false;
+    private String listenMode="assistant";
+    private int listenMinutes=30;
     private static final java.util.Set<String> uploading=java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final Handler handler=new Handler(Looper.getMainLooper());
-    private final Runnable refreshTask=new Runnable(){public void run(){status.setText(RecorderService.status);refreshFiles();handler.postDelayed(this,2000);}};
+    private final Runnable refreshTask=new Runnable(){public void run(){status.setText(ListeningService.active?ListeningService.status:RecorderService.status+"\n"+ListeningService.status);refreshFiles();handler.postDelayed(this,2000);}};
     @Override public void onCreate(Bundle state){
         super.onCreate(state);
         ScrollView scroll=new ScrollView(this);layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(40,60,40,40);layout.setBackgroundColor(Color.rgb(11,17,23));scroll.addView(layout);setContentView(scroll);
-        TextView title=new TextView(this);title.setText("JARVIS · Recorder");title.setTextSize(26);title.setTextColor(Color.rgb(154,229,198));layout.addView(title);
-        TextView description=new TextView(this);description.setText("Aufnehmen → lokal speichern → über Tailscale an deinen Laptop senden. Aufnahme maximal 2 Minuten. Keine Cloud-Sprachverarbeitung.");layout.addView(description);
-        address=new EditText(this);address.setHint("https://dein-laptop.dein-netz.ts.net");address.setSingleLine(true);address.setInputType(17);address.setText(getPreferences(0).getString("url",""));layout.addView(address);
-        addButton(layout,"Adresse speichern",()->{try{String url=baseUrl();getPreferences(0).edit().putString("url",url).apply();message("Adresse gespeichert.");}catch(Exception e){message(e.getMessage());}});
+        TextView title=new TextView(this);title.setText("JARVIS · Sprache");title.setTextSize(26);title.setTextColor(Color.rgb(154,229,198));layout.addView(title);
+        TextView description=new TextView(this);description.setText("Sprachassistent und stilles Mitschreiben über deinen privaten Laptop. Einzelne manuelle Aufnahmen bleiben auf 2 Minuten begrenzt. Keine Cloud-Sprachverarbeitung.");layout.addView(description);
+        address=new EditText(this);address.setHint("https://dein-laptop.dein-netz.ts.net");address.setSingleLine(true);address.setInputType(17);address.setText(getSharedPreferences("voice",0).getString("url",getPreferences(0).getString("url","")));layout.addView(address);
+        addButton(layout,"Adresse speichern",()->{try{String url=baseUrl();getPreferences(0).edit().putString("url",url).apply();getSharedPreferences("voice",0).edit().putString("url",url).apply();message("Adresse gespeichert.");}catch(Exception e){message(e.getMessage());}});
+        TextView guide=new TextView(this);guide.setText("Hey Jarvis: englisch aussprechen, kurz warten, dann Wunsch auf Deutsch sagen. Stillmodus: Notizen/Termine ohne Stimme. Mikrofon ist sichtbar aktiv. Kein Start nach Neustart. Akkuverbrauch noch nicht gemessen.");layout.addView(guide);
+        addButton(layout,"Englisches Hey-Jarvis-Modell installieren (ca. 40 MB)",()->new Thread(()->{try{message("Modell wird direkt vom Vosk-Anbieter geladen.");WakeModel.install(this);message("Hey-Jarvis-Modell bereit.");}catch(Exception e){message("Modelldownload fehlgeschlagen: "+e.getMessage());}}).start());
+        Spinner duration=new Spinner(this);duration.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"30 Minuten","60 Minuten","Bis 8 Stunden"}));duration.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener(){public void onItemSelected(AdapterView<?> p,android.view.View v,int position,long id){listenMinutes=new int[]{30,60,480}[position];}public void onNothingSelected(AdapterView<?> p){}});layout.addView(duration);
+        addButton(layout,"Hey Jarvis aktivieren",()->listen("assistant"));
+        addButton(layout,"Still zuhören aktivieren",()->listen("silent"));
+        addButton(layout,"Zuhören ausschalten",()->stopService(new Intent(this,ListeningService.class)));
+        addButton(layout,"Ausstehende Sprachdateien erneut senden",this::retryVoice);
+        addButton(layout,"Verarbeitete Sprachdateien vom Pixel löschen",()->new android.app.AlertDialog.Builder(this).setMessage("Löscht nur bereits verarbeitete Sprachdateien auf diesem Pixel. Notizen/Termine auf Laptop bleiben erhalten.").setPositiveButton("Löschen",(d,w)->{File dir=new File(getFilesDir(),"voice-pending");File[] entries=dir.listFiles((folder,name)->name.endsWith(".wav"));int count=0;if(entries!=null)for(File file:entries)if(new File(file.getPath()+".done").exists()){new File(file.getPath()+".mode").delete();new File(file.getPath()+".receipt").delete();new File(file.getPath()+".done").delete();if(file.delete())count++;}message(count+" verarbeitete Dateien gelöscht.");}).setNegativeButton("Abbrechen",null).show());
+        Switch lock=new Switch(this);lock.setText("Stille Kachel auf Sperrbildschirm erlauben");lock.setChecked(getSharedPreferences("voice",0).getBoolean("lockEnabled",false));lock.setOnCheckedChangeListener((b,checked)->getSharedPreferences("voice",0).edit().putBoolean("lockEnabled",checked).apply());layout.addView(lock);
         addButton(layout,"● Aufnahme starten",this::record);
         addButton(layout,"■ Aufnahme stoppen",()->startService(new Intent(this,RecorderService.class).setAction("stop")));
         addButton(layout,"Jarvis öffnen",()->{try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(baseUrl())));}catch(Exception e){message(e.getMessage());}});
@@ -45,11 +56,45 @@ public class MainActivity extends Activity {
     private void addButton(LinearLayout parent,String label,Runnable action){Button b=new Button(this);b.setText(label);b.setOnClickListener(v->action.run());parent.addView(b);}
     private void record(){
         if(RecorderService.recording)return;
+        if(ListeningService.active){message("Zuerst Zuhörmodus ausschalten.");return;}
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},10);return;}
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},11);return;}
         try{startForegroundService(new Intent(this,RecorderService.class));}catch(Exception e){message("Aufnahme nur aus geöffneter App starten.");}
     }
-    @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==10&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)record();else if(code==11){try{startForegroundService(new Intent(this,RecorderService.class));}catch(Exception e){message("Aufnahme konnte nicht gestartet werden.");}}}
+    private void retryVoice(){
+        if(ListeningService.active){message("Zuerst Zuhören stoppen, damit keine parallelen Uploads laufen.");return;}
+        new Thread(()->{
+            File dir=new File(getFilesDir(),"voice-pending");File[] pending=dir.listFiles((d,name)->name.endsWith(".wav"));
+            if(pending==null){message("Keine ausstehenden Sprachdateien.");return;}
+            int count=0;
+            for(File file:pending){
+                if(new File(file.getPath()+".done").exists()||!uploading.add(file.getPath()))continue;
+                try{
+                    String base=VoiceClient.base(this),mode=Files.readString(new File(file.getPath()+".mode").toPath());
+                    String rid=VoiceClient.upload(this,file,mode);
+                    boolean done=false;
+                    for(int i=0;i<180;i++){
+                        JSONObject result=VoiceClient.json(VoiceClient.request(base,"/api/voice/result?id="+rid,null,"",30000));
+                        if("done".equals(result.optString("status"))){if(result.optJSONObject("result")==null)throw new IOException("Transkript auf Laptop prüfen");done=true;break;}
+                        if("error".equals(result.optString("status")))throw new IOException("Verarbeitung auf Laptop prüfen");
+                        Thread.sleep(3000);
+                    }
+                    if(!done)throw new IOException("Verarbeitung dauert länger");
+                    Files.writeString(new File(file.getPath()+".done").toPath(),"ok");count++;
+                }catch(Exception e){message("Noch nicht verarbeitet: "+e.getMessage());break;}
+                finally{uploading.remove(file.getPath());}
+            }
+            message(count+" Sprachdateien verarbeitet. Keine Sprachausgabe beim Nachsenden.");
+        }).start();
+    }
+    private void listen(String mode){
+        listenMode=mode;
+        try{String url=baseUrl();getSharedPreferences("voice",0).edit().putString("url",url).apply();}catch(Exception e){message(e.getMessage());return;}
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},20);return;}
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},21);return;}
+        try{startForegroundService(new Intent(this,ListeningService.class).putExtra("mode",mode).putExtra("minutes",listenMinutes));}catch(Exception e){message("Zuhören aus sichtbarer App starten.");}
+    }
+    @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==20||code==21){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)listen(listenMode);else message("Mikrofon und sichtbare Benachrichtigungen sind für Zuhören erforderlich.");return;}if(code==10&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)record();else if(code==11){try{startForegroundService(new Intent(this,RecorderService.class));}catch(Exception e){message("Aufnahme konnte nicht gestartet werden.");}}}
     private String baseUrl() throws Exception {
         String raw=address.getText().toString().trim().replaceAll("/+$","");URI uri=new URI(raw);
         if(!"https".equals(uri.getScheme())||uri.getHost()==null||!uri.getHost().endsWith(".ts.net")||uri.getPort()!=-1||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||!uri.getPath().isEmpty())throw new Exception("Nur deine vollständige HTTPS-Tailscale-Adresse ohne Pfad verwenden.");

@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from zoneinfo import ZoneInfo
+from voice_actions import decide as decide_voice
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('JARVIS_DATA_DIR', str(ROOT))).resolve()
@@ -45,7 +46,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.5.1'
+VERSION = '0.6.0'
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -60,7 +61,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 6:
+        if old_version < 7:
             backup()
     with connect() as c:
         c.executescript('''
@@ -94,7 +95,12 @@ def init():
                     c.execute('UPDATE note_tasks SET signature=? WHERE note_id=? AND position=?',(task_signature(task),*link))
                 except (TypeError,KeyError,IndexError,ValueError):
                     pass
-        c.execute('PRAGMA user_version=6')
+        if 'mode' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute("ALTER TABLE recordings ADD COLUMN mode TEXT DEFAULT 'protocol'")
+        if 'captured_at' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute("ALTER TABLE recordings ADD COLUMN captured_at TEXT DEFAULT ''")
+        c.execute('CREATE TABLE IF NOT EXISTS voice_actions(recording_id TEXT PRIMARY KEY,result TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP)')
+        c.execute('PRAGMA user_version=7')
 
 
 def rows(sql, args=()):
@@ -293,6 +299,35 @@ def save_protocol(transcript, analysis, rid=None):
         return cur.lastrowid
 
 
+def apply_voice_action(rid, transcript, mode):
+    existing=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
+    if existing: return json.loads(existing[0]['result'])
+    record=rows('SELECT created,captured_at FROM recordings WHERE id=?',(rid,))
+    reference=(datetime.fromisoformat(record[0]['captured_at']).astimezone(ZURICH) if record[0]['captured_at'] else datetime.fromisoformat(record[0]['created']).replace(tzinfo=timezone.utc).astimezone(ZURICH)) if record else datetime.now(ZURICH)
+    decision=decide_voice(transcript,mode,ollama,settings()['model'],reference=reference)
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        existing=c.execute('SELECT result FROM voice_actions WHERE recording_id=?',(rid,)).fetchone()
+        if existing: return json.loads(existing[0])
+        if decision['action']=='note':
+            analysis={'title':decision['title'] or 'Sprachnotiz','category':'Allgemein',
+                'summary':decision['summary'] or transcript,'key_points':[], 'decisions':[],
+                'open_questions':['Terminangaben prüfen'] if decision.get('needs_review') else [],'tasks':[]}
+            cur=c.execute('INSERT INTO notes(body,title,category,analysis,recording_id) VALUES(?,?,?,?,?)',
+                (transcript,analysis['title'],'Allgemein',json.dumps(analysis,ensure_ascii=False),rid))
+            decision['note_id']=cur.lastrowid
+            if mode=='assistant' and not decision.get('needs_review'): decision['reply']='Notiz gespeichert.'
+        elif decision['action']=='calendar':
+            eid=uuid.uuid4().hex
+            c.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',(eid,decision['title'] or 'Sprachtermin',decision['start'],decision['end'],'Jarvis Sprache',
+                transcript+'\n'+('Dauer automatisch: 30 Minuten.' if decision['default_duration'] else 'Dauer aus Spracheingabe.')))
+            decision['event_id']=eid
+            if mode=='assistant': decision['reply']='Im lokalen Jarvis-Kalender eingetragen.'+(' Dauer: 30 Minuten.' if decision['default_duration'] else '')
+        if mode=='silent': decision['reply']=''
+        c.execute('INSERT INTO voice_actions(recording_id,result) VALUES(?,?)',(rid,json.dumps(decision,ensure_ascii=False)))
+    return decision
+
+
 def recording_worker():
     while True:
         rid = JOBS.get()
@@ -314,7 +349,11 @@ def recording_worker():
                 with connect() as c:
                     c.execute("UPDATE recordings SET status='analyzing',transcript=?,error='' WHERE id=?", (transcript, rid))
                 try:
-                    save_protocol(transcript, summarize_transcript(transcript), rid)
+                    mode=rows('SELECT mode FROM recordings WHERE id=?',(rid,))[0]['mode']
+                    if mode in ('assistant','silent'):
+                        apply_voice_action(rid,transcript,mode)
+                    else:
+                        save_protocol(transcript, summarize_transcript(transcript), rid)
                     with connect() as c:
                         c.execute("UPDATE recordings SET status='done' WHERE id=?",(rid,))
                 except Exception:
@@ -385,6 +424,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM training ORDER BY day DESC,id DESC LIMIT 1000'))
             if path == '/api/holdings':
                 return self.send(rows('SELECT * FROM holdings ORDER BY id DESC LIMIT 3000'))
+            if path == '/api/voice/result':
+                rid=q.get('id',[''])[0]
+                records=rows('SELECT status,error FROM recordings WHERE id=?',(rid,))
+                if not records: return self.send({'error':'Aufnahme fehlt'},code=404)
+                actions=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
+                return self.send({**records[0],'result':json.loads(actions[0]['result']) if actions else None})
             if path == '/api/recordings':
                 return self.send(rows('SELECT * FROM recordings ORDER BY created DESC,rowid DESC LIMIT 100'))
             if path == '/api/bees/local':
@@ -392,7 +437,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/bees':
                 return self.send(rows("SELECT * FROM imports WHERE kind='bees' ORDER BY id DESC LIMIT 20"))
             if path == '/api/export':
-                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks']
+                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks','voice_actions']
                 with connect() as c:
                     data = {t:[dict(r) for r in c.execute('SELECT * FROM '+t)] for t in tables}
                 return self.send(dict(version=VERSION, exported=now(), data=data), attachment='jarvis-export.json')
@@ -556,6 +601,14 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Stimme konnte nicht erzeugt werden')
             return self.send(result.stdout,'audio/wav')
         if path == '/api/recordings':
+            mode=text(b,'mode',20,False) or 'protocol'
+            if mode not in ('protocol','assistant','silent'): raise ValueError('Ungültiger Sprachmodus')
+            captured=text(b,'captured_at',80,False)
+            if captured:
+                stamp=datetime.fromisoformat(captured.replace('Z','+00:00'))
+                if stamp.tzinfo is None or stamp>datetime.now(timezone.utc)+timedelta(minutes=5):
+                    raise ValueError('Ungültige Aufnahmezeit')
+                captured=stamp.isoformat()
             mime = text(b,'mime',100).split(';')[0]
             if mime not in ('audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg','audio/x-m4a'):
                 raise ValueError('Audioformat nicht unterstützt')
@@ -567,7 +620,7 @@ class Handler(BaseHTTPRequestHandler):
             directory.mkdir(exist_ok=True)
             (directory/rid).write_bytes(raw)
             with connect() as c:
-                c.execute('INSERT INTO recordings(id,status,mime) VALUES(?,?,?)',(rid,'saved',mime))
+                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at) VALUES(?,?,?,?,?)',(rid,'saved',mime,mode,captured))
             return self.send({'ok':True,'id':rid})
         if path == '/api/transcribe':
             rid = text(b,'id',32)
