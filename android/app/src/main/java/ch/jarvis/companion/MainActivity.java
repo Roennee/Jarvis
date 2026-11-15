@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
             for(File file:pending){
                 if(new File(file.getPath()+".done").exists()||!uploading.add(file.getPath()))continue;
                 try{
-                    String base=VoiceClient.base(this),mode=Files.readString(new File(file.getPath()+".mode").toPath());
+                    String base=VoiceClient.base(this),mode=VoiceClient.readText(new File(file.getPath()+".mode").toPath());
                     String rid=VoiceClient.upload(this,file,mode);
                     boolean done=false;
                     for(int i=0;i<180;i++){
@@ -80,7 +80,7 @@ public class MainActivity extends Activity {
                         Thread.sleep(3000);
                     }
                     if(!done)throw new IOException("Verarbeitung dauert länger");
-                    Files.writeString(new File(file.getPath()+".done").toPath(),"ok");count++;
+                    VoiceClient.writeText(new File(file.getPath()+".done").toPath(),"ok");count++;
                 }catch(Exception e){message("Noch nicht verarbeitet: "+e.getMessage());break;}
                 finally{uploading.remove(file.getPath());}
             }

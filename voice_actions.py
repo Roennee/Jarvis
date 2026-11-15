@@ -54,7 +54,7 @@ def decide(transcript, mode, generate, model, reference=None):
     if action in ('note','calendar') and (not clean['evidence'] or clean['evidence'] not in transcript):
         raise ValueError('Quellbeleg fehlt; keine automatische Speicherung')
     if mode=='silent' and action=='answer': action='none'
-    decision={'action':action,**clean,'reply':clean['reply'] if mode=='assistant' else ''}
+    decision={'action':action,**clean,'reply':clean['reply'] if mode=='assistant' and action=='answer' else ''}
     if action=='calendar':
         # Questions about dates must never silently create new appointments.
         if re.search(r'(?i)^(?:was|wann|welche|habe ich|ist|gibt es)\b',clean['evidence'].strip()):

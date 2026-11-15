@@ -106,14 +106,14 @@ public class ListeningService extends Service {
         if(used>100000000)throw new IOException("Lokaler Sprachspeicher voll. Dateien in der App prüfen/löschen.");
         File file=new File(dir,System.currentTimeMillis()+"-"+java.util.UUID.randomUUID()+".wav");
         try(OutputStream out=new FileOutputStream(file)){int len=pcm.length;ByteBuffer header=ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);header.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(len+36).put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short)1).putShort((short)1).putInt(16000).putInt(32000).putShort((short)2).putShort((short)16).put("data".getBytes(StandardCharsets.US_ASCII)).putInt(len);out.write(header.array());out.write(pcm);}
-        Files.writeString(new File(file.getPath()+".mode").toPath(),mode);
+        VoiceClient.writeText(new File(file.getPath()+".mode").toPath(),mode);
         if("assistant".equals(mode))waiting=true;
         try{uploads.execute(()->process(file));}catch(RejectedExecutionException e){waiting=false;status="Warteschlange voll. Sprachdatei bleibt lokal; später erneut senden.";}
     }
     private void process(File file){
         try{
             String base=VoiceClient.base(this),rid="";
-            String jobMode=Files.readString(new File(file.getPath()+".mode").toPath());
+            String jobMode=VoiceClient.readText(new File(file.getPath()+".mode").toPath());
             // Retry a busy laptop without duplicating the saved recording.
             for(int i=0;i<60;i++){try{rid=VoiceClient.upload(this,file,jobMode);break;}catch(IOException e){if(!e.getMessage().contains("409")||i==59)throw e;Thread.sleep(5000);}}
             for(int i=0;i<180;i++){
@@ -122,7 +122,7 @@ public class ListeningService extends Service {
                 if("done".equals(state)){
                     JSONObject decision=result.optJSONObject("result");
                     if(decision==null)throw new IOException("Transkript bleibt auf Laptop, Aktion muss geprüft werden");
-                    Files.writeString(new File(file.getPath()+".done").toPath(),"ok");
+                    VoiceClient.writeText(new File(file.getPath()+".done").toPath(),"ok");
                     status="Verarbeitet · "+decision.optString("action");
                     if("assistant".equals(jobMode)&&running){String reply=decision.optString("reply");if(!reply.isEmpty())speak(base,reply);}
                     return;

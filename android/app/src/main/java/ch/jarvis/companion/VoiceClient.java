@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import org.json.JSONObject;
 
 final class VoiceClient {
+    static String readText(java.nio.file.Path path)throws IOException{return new String(Files.readAllBytes(path),StandardCharsets.UTF_8);}
+    static void writeText(java.nio.file.Path path,String value)throws IOException{Files.write(path,value.getBytes(StandardCharsets.UTF_8));}
     static String base(Context context) throws Exception {
         String value=context.getSharedPreferences("voice",0).getString("url","");
         URI u=new URI(value);
@@ -31,11 +33,11 @@ final class VoiceClient {
         JSONObject status=json(request(base,"/api/status",null,"",30000));
         if(!status.optBoolean("transcription"))throw new IOException("Lokale Transkription fehlt auf Laptop");
         String token=status.getString("csrf");
-        if(receipt.exists())rid=Files.readString(receipt.toPath());
+        if(receipt.exists())rid=VoiceClient.readText(receipt.toPath());
         else {
             JSONObject data=new JSONObject().put("mime","audio/wav").put("mode",mode).put("captured_at",java.time.Instant.ofEpochMilli(Long.parseLong(file.getName().split("-")[0])).toString()).put("audio",Base64.encodeToString(Files.readAllBytes(file.toPath()),Base64.NO_WRAP));
             rid=json(request(base,"/api/recordings",data,token,45000)).getString("id");
-            Files.writeString(receipt.toPath(),rid);
+            VoiceClient.writeText(receipt.toPath(),rid);
         }
         JSONObject current=json(request(base,"/api/voice/result?id="+rid,null,"",30000));
         if("saved".equals(current.optString("status"))||"interrupted".equals(current.optString("status")))

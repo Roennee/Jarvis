@@ -424,6 +424,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM training ORDER BY day DESC,id DESC LIMIT 1000'))
             if path == '/api/holdings':
                 return self.send(rows('SELECT * FROM holdings ORDER BY id DESC LIMIT 3000'))
+            if path == '/api/voice/actions':
+                entries=rows('SELECT v.recording_id,v.result,v.created,r.transcript,r.mode FROM voice_actions v JOIN recordings r ON r.id=v.recording_id ORDER BY v.created DESC,v.rowid DESC LIMIT 100')
+                for item in entries: item['result']=json.loads(item['result'])
+                return self.send(entries)
             if path == '/api/voice/result':
                 rid=q.get('id',[''])[0]
                 records=rows('SELECT status,error FROM recordings WHERE id=?',(rid,))
