@@ -9,6 +9,7 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
+        <activity android:name=".VoiceSettingsActivity" android:exported="false"/>
         <activity android:name=".ListeningActivity" android:exported="false" android:showWhenLocked="true"/>
         <service android:name=".ListeningService" android:exported="false" android:foregroundServiceType="microphone"/>
         <service android:name=".RecorderService" android:exported="false" android:foregroundServiceType="microphone"/>

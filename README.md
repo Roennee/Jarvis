@@ -105,3 +105,5 @@ Titel und Themen können bearbeitet, Einträge angeheftet und archiviert beziehu
 
 ## v0.6: Sprachaktionen (Android-Prototyp v0.2)
 Zwei explizit gestartete Mikrofon-Sitzungen: lokales englisches Hey-Jarvis-Wakeword und stilles Mitschreiben. Neue Sprachdateien werden nach Offline-Transkription als Notiz, lokaler Termin, Antwort oder keine Aktion verarbeitet. Stiller Modus erzeugt keine Audioantwort. Ausgeführte Aktionen sind je Aufnahme idempotent. Unklare Terminangaben landen als Klärungsnotiz. Mehr unter `android/README.md`. Server-Update allein aktualisiert die APK nicht. Gerätetest und Akkumessung stehen aus.
+
+Android v0.2.1 stellt die bisherige Dashboard-Oberfläche als App-Startseite wieder her. Sprachsteuerung sitzt im bestehenden Bereich Transkripte; native Einrichtung ist eine untergeordnete Ansicht.
