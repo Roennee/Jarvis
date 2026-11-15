@@ -83,7 +83,9 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_voice_action_execution_is_idempotent(self):
         from unittest.mock import patch
-        rid=self.data('/api/recordings',{'mime':'audio/wav','audio':base64.b64encode(b'RIFFtest').decode(),'mode':'silent'})['id']
+        payload={'mime':'audio/wav','audio':base64.b64encode(b'RIFFtest').decode(),'mode':'silent','client_key':'c'*64,'captured_at':'2026-11-14T20:00:00+00:00'}
+        rid=self.data('/api/recordings',payload)['id']
+        self.assertEqual(rid,self.data('/api/recordings',payload)['id'])
         with patch.object(self.app,'decide_voice',return_value={'action':'calendar','title':'Training','start':'2026-11-16T14:00:00+01:00','end':'2026-11-16T14:30:00+01:00','default_duration':True,'reply':'ignored'}):
             first=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')
             second=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')

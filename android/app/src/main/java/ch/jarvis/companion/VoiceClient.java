@@ -35,7 +35,8 @@ final class VoiceClient {
         String token=status.getString("csrf");
         if(receipt.exists())rid=VoiceClient.readText(receipt.toPath());
         else {
-            JSONObject data=new JSONObject().put("mime","audio/wav").put("mode",mode).put("captured_at",java.time.Instant.ofEpochMilli(Long.parseLong(file.getName().split("-")[0])).toString()).put("audio",Base64.encodeToString(Files.readAllBytes(file.toPath()),Base64.NO_WRAP));
+            byte[] digest=java.security.MessageDigest.getInstance("SHA-256").digest(file.getName().getBytes(StandardCharsets.UTF_8));StringBuilder key=new StringBuilder();for(byte b:digest)key.append(String.format(java.util.Locale.ROOT,"%02x",b&255));
+            JSONObject data=new JSONObject().put("client_key",key.toString()).put("mime","audio/wav").put("mode",mode).put("captured_at",java.time.Instant.ofEpochMilli(Long.parseLong(file.getName().split("-")[0])).toString()).put("audio",Base64.encodeToString(Files.readAllBytes(file.toPath()),Base64.NO_WRAP));
             rid=json(request(base,"/api/recordings",data,token,45000)).getString("id");
             VoiceClient.writeText(receipt.toPath(),rid);
         }

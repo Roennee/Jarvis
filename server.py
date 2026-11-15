@@ -99,6 +99,9 @@ def init():
             c.execute("ALTER TABLE recordings ADD COLUMN mode TEXT DEFAULT 'protocol'")
         if 'captured_at' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
             c.execute("ALTER TABLE recordings ADD COLUMN captured_at TEXT DEFAULT ''")
+        if 'client_key' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute('ALTER TABLE recordings ADD COLUMN client_key TEXT')
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS recording_client ON recordings(client_key) WHERE client_key IS NOT NULL')
         c.execute('CREATE TABLE IF NOT EXISTS voice_actions(recording_id TEXT PRIMARY KEY,result TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP)')
         c.execute('PRAGMA user_version=7')
 
@@ -616,6 +619,11 @@ class Handler(BaseHTTPRequestHandler):
             mime = text(b,'mime',100).split(';')[0]
             if mime not in ('audio/webm','audio/ogg','audio/mp4','audio/wav','audio/mpeg','audio/x-m4a'):
                 raise ValueError('Audioformat nicht unterstützt')
+            client_key=text(b,'client_key',64,False) or None
+            if client_key and not re.fullmatch('[0-9a-f]{64}',client_key): raise ValueError('Ungültige Aufnahme-ID')
+            if client_key:
+                existing=rows('SELECT id FROM recordings WHERE client_key=?',(client_key,))
+                if existing: return self.send({'ok':True,'id':existing[0]['id']})
             raw = base64.b64decode(text(b,'audio',28_500_000),validate=True)
             if not 0 < len(raw) <= 20_000_000:
                 raise ValueError('Aufnahme muss kleiner als 20 MB sein')
@@ -624,7 +632,7 @@ class Handler(BaseHTTPRequestHandler):
             directory.mkdir(exist_ok=True)
             (directory/rid).write_bytes(raw)
             with connect() as c:
-                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at) VALUES(?,?,?,?,?)',(rid,'saved',mime,mode,captured))
+                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at,client_key) VALUES(?,?,?,?,?,?)',(rid,'saved',mime,mode,captured,client_key))
             return self.send({'ok':True,'id':rid})
         if path == '/api/transcribe':
             rid = text(b,'id',32)
