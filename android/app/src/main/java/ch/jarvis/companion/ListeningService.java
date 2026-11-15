@@ -19,6 +19,10 @@ public class ListeningService extends Service {
     public static volatile boolean active=false;
     public static volatile String status="Zuhören ausgeschaltet";
     private volatile boolean running=false,waiting=false;
+    private volatile long followUntil=0;
+    private volatile boolean directCaptureRequested=false;
+    private android.speech.tts.TextToSpeech cueVoice;
+    private volatile boolean cueReady=false;
     private volatile AudioRecord microphone;
     private volatile MediaPlayer player;
     private PowerManager.WakeLock wake;
@@ -29,12 +33,14 @@ public class ListeningService extends Service {
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent==null)return START_NOT_STICKY;
         if("stop".equals(intent.getAction())){stopSession();return START_NOT_STICKY;}
+        if("talk".equals(intent.getAction()))directCaptureRequested=true;
         if(active||(capture!=null&&capture.isAlive()))return START_NOT_STICKY;
+        getSharedPreferences("voice",0).edit().putString("session_id",java.util.UUID.randomUUID().toString()).apply();
         mode="silent".equals(intent.getStringExtra("mode"))?"silent":"assistant";
         try{
             if(RecorderService.recording)throw new IOException("Zuerst laufende Aufnahme stoppen");
             VoiceClient.base(this);
-            if("assistant".equals(mode)&&!WakeModel.ready(this))throw new IOException("Zuerst Hey-Jarvis-Modell installieren");
+            if("assistant".equals(mode)&&!WakeModel.ready(this)&&!directCaptureRequested)throw new IOException("Zuerst Hey-Jarvis-Modell installieren");
             NotificationManager nm=getSystemService(NotificationManager.class);
             nm.createNotificationChannel(new NotificationChannel("listening","Jarvis Zuhörmodus",NotificationManager.IMPORTANCE_LOW));
             PendingIntent stop=PendingIntent.getService(this,31,new Intent(this,ListeningService.class).setAction("stop"),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
@@ -44,6 +50,12 @@ public class ListeningService extends Service {
                 .addAction(new Notification.Action.Builder(null,"Zuhören stoppen",stop).build()).build();
             startForeground(3,notification,ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
             running=true;active=true;
+            cueVoice=new android.speech.tts.TextToSpeech(this,result->{
+                if(result==android.speech.tts.TextToSpeech.SUCCESS&&cueVoice!=null){
+                    java.util.Set<android.speech.tts.Voice> voices=cueVoice.getVoices();
+                    if(voices!=null)for(android.speech.tts.Voice v:voices)if("de".equals(v.getLocale().getLanguage())&&!v.isNetworkConnectionRequired()){cueVoice.setVoice(v);cueReady=true;break;}
+                }
+            });
             long minutes=Math.max(1,Math.min(480,intent.getIntExtra("minutes",30)));
             wake=((PowerManager)getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,"Jarvis:Listen");wake.acquire(minutes*60000+10000);
             capture=new Thread(()->listen(minutes*60000),"jarvis-audio");capture.start();
@@ -56,7 +68,7 @@ public class ListeningService extends Service {
         byte[] previous=new byte[0];boolean capturing=false;int voiced=0,silence=0;long triggered=0;
         final int sampleRate=16000;long deadline=SystemClock.elapsedRealtime()+duration;
         try{
-            if("assistant".equals(mode)){model=new Model(WakeModel.directory(this).getAbsolutePath());recognizer=new Recognizer(model,sampleRate,"[\"hey jarvis\", \"hi jarvis\", \"[unk]\"]");}
+            if("assistant".equals(mode)&&WakeModel.ready(this)){model=new Model(WakeModel.directory(this).getAbsolutePath());recognizer=new Recognizer(model,sampleRate,"[\"hey jarvis\", \"hi jarvis\", \"[unk]\"]");}
             int size=Math.max(6400,AudioRecord.getMinBufferSize(sampleRate,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT));
             audio=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,sampleRate,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,size);
             microphone=audio;
@@ -66,13 +78,18 @@ public class ListeningService extends Service {
             while(running&&SystemClock.elapsedRealtime()<deadline){
                 int n=audio.read(buffer,0,buffer.length);if(n<0)throw new IOException("Mikrofon unterbrochen");if(n==0)continue;
                 if(waiting&&"assistant".equals(mode)){if(recognizer!=null)recognizer.reset();continue;}
+                if("assistant".equals(mode)&&!capturing&&(directCaptureRequested||SystemClock.elapsedRealtime()<followUntil)){directCaptureRequested=false;capturing=true;triggered=SystemClock.elapsedRealtime();voiced=0;silence=0;utterance.reset();status="Ich höre deinen Wunsch";}
                 if(recognizer!=null&&!capturing){
                     boolean done=recognizer.acceptWaveForm(buffer,n);
                     JSONObject result=new JSONObject(done?recognizer.getResult():recognizer.getPartialResult());
                     String words=result.optString(done?"text":"partial");
                     if(words.contains("hey jarvis")||words.contains("hi jarvis")){
                         capturing=true;triggered=SystemClock.elapsedRealtime();voiced=0;silence=0;utterance.reset();recognizer.reset();status="Jarvis hört deinen Wunsch";
-                        // No sound: avoid feeding a cue into the microphone.
+                        // Pause capture during the local acknowledgement to avoid self-recording.
+                        if(cueReady){cueVoice.speak("Ja, ich höre.",android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"wake");Thread.sleep(250);long cueEnd=SystemClock.elapsedRealtime()+2500;while(running&&cueVoice.isSpeaking()&&SystemClock.elapsedRealtime()<cueEnd)Thread.sleep(50);}
+                        else {ToneGenerator tone=new ToneGenerator(AudioManager.STREAM_MUSIC,75);tone.startTone(ToneGenerator.TONE_PROP_ACK,180);Thread.sleep(220);tone.release();}
+                        byte[] flush=new byte[size];audio.read(flush,0,flush.length,AudioRecord.READ_NON_BLOCKING);
+                        triggered=SystemClock.elapsedRealtime();
                     }
                     continue;
                 }
@@ -83,9 +100,9 @@ public class ListeningService extends Service {
                 if(capturing){
                     utterance.write(buffer,0,n);if(speech){voiced+=ms;silence=0;}else silence+=ms;
                     long elapsed=SystemClock.elapsedRealtime()-triggered;
-                    if((voiced>=400&&silence>=1800)||elapsed>=45000||(voiced==0&&elapsed>=12000)){
+                    if((voiced>=400&&silence>=1800)||elapsed>=45000||(voiced==0&&elapsed>=30000)){
                         if(voiced>=400)enqueue(utterance.toByteArray());
-                        capturing=false;utterance.reset();voiced=0;silence=0;if(recognizer!=null)recognizer.reset();
+                        capturing=false;if(voiced==0)followUntil=0;utterance.reset();voiced=0;silence=0;if(recognizer!=null)recognizer.reset();
                     }
                 }
             }
@@ -107,6 +124,7 @@ public class ListeningService extends Service {
         File file=new File(dir,System.currentTimeMillis()+"-"+java.util.UUID.randomUUID()+".wav");
         try(OutputStream out=new FileOutputStream(file)){int len=pcm.length;ByteBuffer header=ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);header.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(len+36).put("WAVEfmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short)1).putShort((short)1).putInt(16000).putInt(32000).putShort((short)2).putShort((short)16).put("data".getBytes(StandardCharsets.US_ASCII)).putInt(len);out.write(header.array());out.write(pcm);}
         VoiceClient.writeText(new File(file.getPath()+".mode").toPath(),mode);
+        VoiceClient.writeText(new File(file.getPath()+".session").toPath(),getSharedPreferences("voice",0).getString("session_id",""));
         if("assistant".equals(mode))waiting=true;
         try{uploads.execute(()->process(file));}catch(RejectedExecutionException e){waiting=false;status="Warteschlange voll. Sprachdatei bleibt lokal; später erneut senden.";}
     }
@@ -124,7 +142,8 @@ public class ListeningService extends Service {
                     if(decision==null)throw new IOException("Transkript bleibt auf Laptop, Aktion muss geprüft werden");
                     VoiceClient.writeText(new File(file.getPath()+".done").toPath(),"ok");
                     status="Verarbeitet · "+decision.optString("action");
-                    if("assistant".equals(jobMode)&&running){String reply=decision.optString("reply");if(!reply.isEmpty())speak(base,reply);}
+                    if("assistant".equals(jobMode)&&running){String reply=decision.optString("reply");if(!reply.isEmpty())speak(base,reply);followUntil=SystemClock.elapsedRealtime()+30000;status="Ich höre weiter · 30 Sekunden";}
+                    if(!decision.optBoolean("keep_transcript")){file.delete();new File(file.getPath()+".session").delete();new File(file.getPath()+".receipt").delete();new File(file.getPath()+".mode").delete();new File(file.getPath()+".done").delete();}
                     return;
                 }
                 if("error".equals(state)||"interrupted".equals(state))throw new IOException("Verarbeitung auf Laptop prüfen");
@@ -143,5 +162,5 @@ public class ListeningService extends Service {
         finally{p.release();player=null;file.delete();}
     }
     private void stopSession(){running=false;active=false;if(player!=null){try{player.stop();}catch(Exception ignored){}}if(capture==null){stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}status="Zuhören ausgeschaltet";}
-    @Override public void onDestroy(){running=false;active=false;uploads.shutdown();if(wake!=null&&wake.isHeld())wake.release();super.onDestroy();}
+    @Override public void onDestroy(){running=false;active=false;uploads.shutdown();if(cueVoice!=null){cueVoice.stop();cueVoice.shutdown();}if(wake!=null&&wake.isHeld())wake.release();super.onDestroy();}
 }

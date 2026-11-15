@@ -28,3 +28,11 @@ class VoiceActionsTests(unittest.TestCase):
         self.assertIsNone(calendar_slot('2027-10-31 um 2:30 Uhr',REF))
     def test_default_duration(self):
         slot=calendar_slot('morgen um 14 Uhr',REF);self.assertTrue(slot[2]);self.assertIn('14:30',slot[1])
+
+    def test_tasks_and_explicit_transcript(self):
+        source='Ich muss Mischa anrufen.'
+        task={'body':'Mischa anrufen','evidence':'Mischa anrufen'}
+        d=decide(source,'silent',self.model(action='task',evidence=source,category='Arbeit',tasks=[task]),'model',REF)
+        self.assertEqual(d['tasks'][0]['body'],'Mischa anrufen');self.assertEqual(d['category'],'Arbeit')
+        d=decide('Erstelle ein Transkript davon','assistant',None,'model',REF)
+        self.assertTrue(d['keep_transcript'])

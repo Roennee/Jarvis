@@ -94,10 +94,55 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(len([e for e in self.data('/api/events') if e['id']==first['event_id']]),1)
         self.assertEqual(self.req('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'untrusted'})[0],400)
 
+    def test_conversation_requires_review_and_silent_creates_tasks(self):
+        from unittest.mock import patch
+        task={'body':'Mischa anrufen','owner':'','due':'morgen','evidence':'Mischa anrufen'}
+        decision={'action':'note','title':'Sorter','summary':'Mischa kontaktieren','category':'Arbeit','tasks':[task],'reply':''}
+        def recording(mode,session):
+            return self.data('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':mode,'session_id':session})['id']
+        before=len(self.data('/api/tasks'))
+        rid=recording('assistant','dialogue-test')
+        with patch.object(self.app,'decide_voice',return_value=decision):
+            result=self.app.apply_voice_action(rid,'Mischa anrufen','assistant')
+        self.assertEqual(result['state'],'pending');self.assertEqual(len(self.data('/api/tasks')),before)
+        proposals=self.data('/api/voice/proposals');self.assertTrue(any(p['id']==result['proposal_id'] for p in proposals))
+        accepted=self.data('/api/voice/review',{'id':result['proposal_id'],'accept':True,'category':'Arbeit','title':'Sorter','summary':'Mischa kontaktieren'})
+        self.assertEqual(accepted['state'],'accepted');self.assertEqual(len(self.data('/api/tasks')),before+1)
+        self.data('/api/voice/review',{'id':result['proposal_id'],'accept':True})
+        self.assertEqual(len(self.data('/api/tasks')),before+1)
+        self.assertTrue(any(g['category']=='Arbeit' for g in self.data('/api/notes/overview')))
+        # Another session cannot confirm this session's draft.
+        rid2=recording('assistant','dialogue-test')
+        with patch.object(self.app,'decide_voice',return_value={**decision,'title':'Weitere Notiz'}):
+            second=self.app.apply_voice_action(rid2,'Mischa anrufen','assistant')
+        rid3=recording('assistant','dialogue-test')
+        confirmed=self.app.apply_voice_action(rid3,'Ja bitte','assistant')
+        self.assertEqual(confirmed['reply'],'Gespeichert.')
+        self.assertFalse(any(p['id']==second['proposal_id'] for p in self.data('/api/voice/proposals')))
+        silent_rid=recording('silent','silent-test')
+        with patch.object(self.app,'decide_voice',return_value={**decision,'tasks':[dict(task,body='Layout prüfen')]}):
+            silent=self.app.apply_voice_action(silent_rid,'Mischa anrufen','silent')
+        self.assertEqual(silent['state'],'accepted');self.assertEqual(silent['reply'],'');self.assertEqual(len(silent['task_ids']),1)
+
+    def test_rejection_and_session_isolation(self):
+        from unittest.mock import patch
+        payload={'action':'task','title':'Aufgabe','category':'Arbeit','tasks':[{'body':'Isolierte Aufgabe','owner':'','due':'','evidence':'Isolierte Aufgabe'}],'reply':''}
+        def rec(session):return self.data('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'assistant','session_id':session})['id']
+        with patch.object(self.app,'decide_voice',return_value=payload):
+            proposed=self.app.apply_voice_action(rec('session-a'),'Isolierte Aufgabe','assistant')
+        count=len(self.data('/api/tasks'))
+        with patch.object(self.app,'decide_voice',return_value={'action':'answer','tasks':[],'reply':'Was meinst du?'}):
+            other=self.app.apply_voice_action(rec('session-b'),'Ja','assistant')
+        self.assertEqual(other['reply'],'Was meinst du?')
+        self.data('/api/voice/review',{'id':proposed['proposal_id'],'accept':False})
+        self.assertEqual(len(self.data('/api/tasks')),count)
+        again=self.data('/api/voice/review',{'id':proposed['proposal_id'],'accept':True})
+        self.assertEqual(again['state'],'dismissed');self.assertEqual(len(self.data('/api/tasks')),count)
+
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],7)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],8)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -173,7 +218,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.6.0')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.7.0')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT
@@ -216,3 +261,26 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(app.rows('SELECT * FROM tasks'),[])
                 with patch.object(app,'ollama',return_value={'message':{'content':'{}'}}):
                     with self.assertRaises(ValueError):app.summarize_transcript(transcript)
+
+
+class VoiceWorkerTests(unittest.TestCase):
+    def test_normal_voice_is_discarded_after_processing(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'JARVIS_DATA_DIR':tmp}):
+            spec=importlib.util.spec_from_file_location('voice_worker_test',Path(__file__).resolve().parents[1]/'server.py')
+            app=importlib.util.module_from_spec(spec);spec.loader.exec_module(app);app.init()
+            rid='d'*32
+            directory=Path(tmp)/'recordings';directory.mkdir();(directory/rid).write_bytes(b'fakeaudio')
+            with app.connect() as c:c.execute("INSERT INTO recordings(id,status,mime,mode,session_id) VALUES(?, 'queued','audio/wav','silent','worker')",(rid,))
+            obj={'action':'task','title':'Anruf','summary':'Anruf nötig','category':'Arbeit','evidence':'Mischa anrufen','tasks':[{'body':'Mischa anrufen','owner':'','due':'','evidence':'Mischa anrufen'}]}
+            def fake(*a,**kw):return {'message':{'content':json.dumps(obj)}}
+            with patch.object(app,'ollama',side_effect=fake),patch.object(app.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps({'text':'Mischa anrufen'}))):
+                threading.Thread(target=app.recording_worker,daemon=True).start();app.JOBS.put(rid)
+                import time
+                deadline=time.monotonic()+5
+                while app.JOBS.unfinished_tasks and time.monotonic()<deadline:time.sleep(.01)
+                self.assertEqual(app.JOBS.unfinished_tasks,0)
+            row=app.rows('SELECT * FROM recordings WHERE id=?',(rid,))[0]
+            self.assertEqual(row['status'],'done');self.assertEqual(row['transcript'],'');self.assertFalse((directory/rid).exists())
+            self.assertEqual(len(app.rows('SELECT * FROM tasks')),1)

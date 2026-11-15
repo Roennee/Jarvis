@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const views={overview:'Übersicht',chat:'Chat',voice:'Transkripte',notes:'Notizen & Protokolle',tasks:'Aufgaben',calendar:'Kalender',training:'Training',invest:'Investitionen',settings:'Einstellungen'};
+const views={overview:'Übersicht',chat:'Chat',voice:'Sprechen',notes:'Notizen & Protokolle',tasks:'Aufgaben',calendar:'Kalender',training:'Training',invest:'Investitionen',settings:'Einstellungen'};
 let csrf='',system={},chatId='',lastAnswer='',lastRecording='',deviceVoices=[],activeAudioUrl='',recordBlob=null,recordMime='',recorder=null,recordStream=null,recordChunks=[],recordStart=0,recordTimer=null,uploading=false,transcriptDirty=false,polling=false;
 const fmt=d=>{try{return new Intl.DateTimeFormat('de-CH',{dateStyle:'medium',timeStyle:'short',timeZone:'Europe/Zurich'}).format(new Date(d))}catch{return d}};
 function toast(message,error=false){$('toast').textContent=message;$('toast').classList.toggle('error',error)}
@@ -17,11 +17,25 @@ async function loadStatus(){system=await api('/api/status');csrf=system.csrf;$('
 const noteTopics=['Allgemein','Arbeit','Studium','Training','Investieren','Privat'];
 function field(label,input){const wrapper=el('label',label);wrapper.append(input);return wrapper}
 function inputValue(value,max=1000){const i=el('input');i.value=value||'';i.maxLength=max;return i}
-async function loadNotes(){
- const notes=await api('/api/notes?q='+encodeURIComponent($('noteSearch').value)+'&archived='+$('noteArchive').value);
+let notePage=0;
+async function loadProposals(){
+ const proposals=await api('/api/voice/proposals');$('noteProposals').replaceChildren();
+ if(!proposals.length)empty($('noteProposals'),'Keine offenen Vorschläge.');
+ for(const p of proposals){const a=p.payload,card=el('div','','entry');card.append(el('h3',a.title||'Aufgabenvorschlag'));const title=inputValue(a.title||'Vorschlag',200),summary=el('textarea');summary.value=a.summary||'';summary.rows=3;summary.maxLength=2000;const category=el('select');noteTopics.forEach(v=>{const o=el('option',v);category.append(o)});category.value=a.category||'Allgemein';card.append(field('Titel',title),field('Zusammenfassung',summary),field('Thema (KI-Vorschlag)',category));if(a.start)card.append(el('p','Termin: '+fmt(a.start)));if(a.tasks?.length){card.append(el('h4','Aufgaben'));a.tasks.forEach(t=>card.append(el('p','• '+t.body+(t.due?' · '+t.due:''))))}const actions=el('div','','actions left');actions.append(taskButton('Bestätigen & ablegen',async()=>{await api('/api/voice/review',{id:p.id,accept:true,title:title.value,summary:summary.value||title.value,category:category.value});await loadNotes();toast('Bestätigt und abgelegt.')}),taskButton('Verwerfen',async()=>{await api('/api/voice/review',{id:p.id,accept:false});await loadNotes()}));card.append(actions);$('noteProposals').append(card)}
+}
+async function loadNotes(){await loadProposals();
+ const query='q='+encodeURIComponent($('noteSearch').value)+'&archived='+$('noteArchive').value;
+ const groups=await api('/api/notes/overview?'+query);
+ const topic=$('noteCategory').value;
+ $('noteTopics').replaceChildren();
+ groups.forEach(g=>{const b=taskButton(g.category+' · '+g.count,async()=>{$('noteCategory').value=g.category;notePage=0;await loadNotes()});b.classList.add('card');$('noteTopics').append(b)});
+ const notes=topic?await api('/api/notes?'+query+'&category='+encodeURIComponent(topic)+'&limit=12&offset='+(notePage*12)):[];
  $('notes').replaceChildren();const category=$('noteCategory').value;
  const filtered=notes.filter(n=>!category||n.category===category);
- $('noteResults').textContent=filtered.length+' Einträge';
+ const total=groups.filter(g=>!category||g.category===category).reduce((sum,g)=>sum+g.count,0);
+ $('noteResults').textContent=category?category+' · '+total+' Einträge · Seite '+(notePage+1):'Wähle ein Thema · '+total+' Notizen';
+ $('notePrev').hidden=!category||notePage===0;$('noteNext').hidden=!category||(notePage+1)*12>=total;
+ if(!category)return;
  if(!filtered.length)empty($('notes'),'Noch keine passenden Protokolle oder Notizen.');
  for(const n of filtered){
   let a={};try{a=JSON.parse(n.analysis||'{}')}catch{}
@@ -50,7 +64,7 @@ async function loadNotes(){
     })
    }
   }
-  const details=el('details');details.append(el('summary',a.summary?'Originaltranskript':'Notiztext'),el('p',n.body,'body'));d.append(details);
+  const details=el('details');details.append(el('summary',a.summary?(n.recording_id?'Notiztext':'Originaltext'):'Notiztext'),el('p',n.body,'body'));d.append(details);
   if(!a.summary)d.append(taskButton('KI-Protokoll erstellen',async()=>{toast('Lokale KI analysiert …');await api('/api/protocols',{text:n.body,note_id:n.id,recording_id:n.recording_id||''});await loadNotes();toast('Protokoll abgelegt.')}));
   d.append(taskButton('Protokoll kopieren',async()=>{const parts=[n.title||'Notiz',a.summary||''];for(const [key,label] of [['key_points','Wichtige Punkte'],['decisions','Entscheidungen'],['open_questions','Offene Fragen']])if(a[key]?.length)parts.push(label+'\n'+a[key].map(v=>'• '+v).join('\n'));if(a.tasks?.length)parts.push('Aufgabenvorschläge\n'+a.tasks.map(t=>'• '+t.body+(t.owner?' · '+t.owner:'')+(t.due?' · '+t.due:'')).join('\n'));parts.push('Originaltext\n'+n.body);await navigator.clipboard.writeText(parts.join('\n\n'));toast('Protokoll kopiert.')}));
   $('notes').append(d)
@@ -65,9 +79,8 @@ $('chatForm').onsubmit=async e=>{e.preventDefault();const text=$('prompt').value
 $('saveAnswer').onclick=async()=>{try{if(!lastAnswer)throw Error('Zuerst eine Antwort erzeugen.');await api('/api/notes',{body:lastAnswer});toast('Antwort als Notiz gespeichert.')}catch(e){toast(e.message,true)}};
 function bindForm(id,path,after){$(id).onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const body=Object.fromEntries(new FormData(e.target));await api(path,body);e.target.reset();await after();toast('Gespeichert.')}catch(err){toast(err.message,true)}finally{button.disabled=false}}}
 bindForm('noteForm','/api/notes',loadNotes);bindForm('taskForm','/api/tasks',loadTasks);bindForm('eventForm','/api/events',loadEvents);bindForm('trainingForm','/api/training',loadTraining);
-$('noteArchive').onchange=()=>loadNotes().catch(e=>toast(e.message,true));
-$('noteCategory').onchange=()=>loadNotes().catch(e=>toast(e.message,true));
-$('noteSearch').oninput=()=>loadNotes().catch(e=>toast(e.message,true));
+$('notePrev').onclick=()=>{notePage=Math.max(0,notePage-1);loadNotes().catch(e=>toast(e.message,true))};$('noteNext').onclick=()=>{notePage++;loadNotes().catch(e=>toast(e.message,true))};
+$('noteArchive').onchange=$('noteCategory').onchange=$('noteSearch').oninput=()=>{notePage=0;loadNotes().catch(e=>toast(e.message,true))};
 async function loadEvents(){const data=await api('/api/events');$('events').replaceChildren();if(!data.length)empty($('events'),'Noch keine Termine.');data.forEach(d=>$('events').append(entry(d.title+'\n'+fmt(d.start)+' – '+fmt(d.end)+'\n'+d.source+(d.details?'\n'+d.details:''))))}
 async function loadTraining(){const data=await api('/api/training');$('training').replaceChildren();if(!data.length)empty($('training'),'Noch keine Einheiten gespeichert.');data.forEach(d=>$('training').append(entry(d.day+' · '+d.title+'\n'+d.plan+(d.result?'\nResultat: '+d.result:''))))}
 async function loadInvest(){const [holdings,bees]=await Promise.all([api('/api/holdings'),api('/api/bees')]);$('holdings').replaceChildren();if(!holdings.length)empty($('holdings'),'Noch kein Depotstand importiert.');const batches=[...new Set(holdings.map(x=>x.batch))];for(const batch of batches){const list=holdings.filter(h=>h.batch===batch),section=el('details'),summary=el('summary','Stand '+fmt(batch)+' · '+list.length+' Positionen');section.append(summary);section.open=batch===batches[0];const totals={};list.forEach(h=>{totals[h.currency]=(totals[h.currency]||0)+h.quantity*h.price;section.append(entry(h.symbol+' · '+h.quantity+' × '+h.price+' '+h.currency))});Object.entries(totals).forEach(([currency,total])=>section.append(el('p','Summe '+currency+': '+total.toLocaleString('de-CH',{maximumFractionDigits:2}))));$('holdings').append(section)}$('bees').replaceChildren();if(!bees.length)empty($('bees'),'Noch kein Bees-Bericht importiert.');bees.forEach(b=>{const d=el('details');d.append(el('summary','Bericht '+fmt(b.created+'Z')),el('pre',JSON.stringify(JSON.parse(b.body),null,2)));$('bees').append(d)})}
@@ -91,8 +104,8 @@ $('uploadRecording').onclick=async()=>{if(!recordBlob||uploading)return;uploadin
 async function loadVoiceActions(){
  const items=await api('/api/voice/actions');$('voiceActions').replaceChildren();
  if(!items.length)empty($('voiceActions'),'Noch keine automatischen Sprachaktionen. Android-App v0.2 erforderlich.');
- const labels={note:'Notiz abgelegt',calendar:'Lokaler Termin erstellt',answer:'Antwort',none:'Keine Aktion'};
- for(const item of items){const r=item.result;const d=entry((labels[r.action]||r.action)+(r.title?' · '+r.title:''),item.created+'Z');d.append(el('small',item.mode==='silent'?'Stillmodus':'Hey Jarvis'));if(r.needs_review)d.append(el('p','Terminangaben müssen geklärt werden.'));if(r.start)d.append(el('p',fmt(r.start)));const source=el('details');source.append(el('summary','Transkript anzeigen'),el('p',item.transcript,'body'));d.append(source);if(r.action==='note')d.append(taskButton('Notizen öffnen',()=>show('notes')));if(r.action==='calendar')d.append(taskButton('Kalender öffnen',()=>show('calendar')));$('voiceActions').append(d)}
+ const labels={note:'Notiz',calendar:'Termin',task:'Aufgaben',answer:'Antwort',none:'Keine Aktion'};
+ for(const item of items){const r=item.result;const d=entry((r.state==='pending'?'Vorschlag zur Bestätigung':r.state==='dismissed'?'Verworfen':labels[r.action]||r.action)+(r.title?' · '+r.title:''),item.created+'Z');d.append(el('small',item.mode==='silent'?'Stillmodus':'Hey Jarvis'));if(r.needs_review)d.append(el('p','Terminangaben müssen geklärt werden.'));if(r.start)d.append(el('p',fmt(r.start)));const source=el('details');source.append(el('summary','Transkript anzeigen'),el('p',item.transcript,'body'));d.append(source);if(r.action==='note')d.append(taskButton('Notizen öffnen',()=>show('notes')));if(r.action==='calendar')d.append(taskButton('Kalender öffnen',()=>show('calendar')));$('voiceActions').append(d)}
 }
 async function loadRecordings(){await loadVoiceActions();const data=await api('/api/recordings');$('recordings').replaceChildren();if(!data.length)empty($('recordings'),'Noch keine Aufnahmen.');let pending=false;data.forEach(r=>{const states={saved:'Gespeichert',queued:'Wartet auf Transkription',processing:'Wird transkribiert',analyzing:'KI erstellt Protokoll',done:'Transkript bereit',error:'Verarbeitung fehlgeschlagen',interrupted:'Unterbrochen'};const d=entry(states[r.status]||r.status,r.created+'Z');if(['queued','processing','analyzing'].includes(r.status))pending=true;if(r.error)d.append(el('p',r.error));const actions=el('div','','actions left');const a=el('a','Anhören / Audio öffnen');a.href='/api/audio/'+r.id;a.target='_blank';a.rel='noopener';actions.append(a);if(!['queued','processing','analyzing'].includes(r.status))actions.append(taskButton('Transkribieren',async()=>{await api('/api/transcribe',{id:r.id});await loadRecordings()}));if(r.status==='done')actions.append(taskButton('Protokolle öffnen',()=>show('notes')));if(r.status==='done')actions.append(taskButton('Transkript prüfen',()=>{if(transcriptDirty&&lastRecording!==r.id&&!confirm('Ungespeicherte Transkriptänderungen verwerfen?'))return;lastRecording=r.id;transcriptDirty=false;$('transcript').value=r.transcript;$('transcriptCard').hidden=false;$('transcriptCard').scrollIntoView({behavior:'smooth',block:'start'})}));d.append(actions);$('recordings').append(d)});if(pending&&!polling){polling=true;setTimeout(async()=>{polling=false;try{await loadRecordings()}catch(e){toast(e.message,true)}},4000)}}
 $('transcript').oninput=()=>transcriptDirty=true;$('saveTranscript').onclick=async()=>{try{await api('/api/corrections',{id:lastRecording,text:$('transcript').value});toast('Lokale KI erstellt das Protokoll …');await api('/api/protocols',{recording_id:lastRecording,text:$('transcript').value});transcriptDirty=false;toast('Protokoll unter Notizen abgelegt.');await show('notes')}catch(e){toast(e.message,true)}};

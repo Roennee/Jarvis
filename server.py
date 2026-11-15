@@ -46,7 +46,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.6.0'
+VERSION = '0.7.0'
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -61,7 +61,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 7:
+        if old_version < 8:
             backup()
     with connect() as c:
         c.executescript('''
@@ -103,7 +103,10 @@ def init():
             c.execute('ALTER TABLE recordings ADD COLUMN client_key TEXT')
         c.execute('CREATE UNIQUE INDEX IF NOT EXISTS recording_client ON recordings(client_key) WHERE client_key IS NOT NULL')
         c.execute('CREATE TABLE IF NOT EXISTS voice_actions(recording_id TEXT PRIMARY KEY,result TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP)')
-        c.execute('PRAGMA user_version=7')
+        if 'session_id' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute("ALTER TABLE recordings ADD COLUMN session_id TEXT DEFAULT ''")
+        c.execute("CREATE TABLE IF NOT EXISTS voice_proposals(id INTEGER PRIMARY KEY,recording_id TEXT UNIQUE,session_id TEXT,payload TEXT,state TEXT DEFAULT 'pending',created TEXT DEFAULT CURRENT_TIMESTAMP)")
+        c.execute('PRAGMA user_version=8')
 
 
 def rows(sql, args=()):
@@ -302,32 +305,85 @@ def save_protocol(transcript, analysis, rid=None):
         return cur.lastrowid
 
 
+VOICE_DIALOGUE={}
+
+
+def commit_voice(c, decision, rid):
+    result=dict(decision)
+    if decision['action']=='note':
+        summary=decision.get('summary') or decision.get('title') or 'Sprachnotiz'
+        category=decision.get('category','Allgemein')
+        analysis={'summary':summary,'key_points':[], 'tasks':[], 'decisions':[], 'open_questions':['Termin klären'] if decision.get('needs_review') else []}
+        cur=c.execute('INSERT INTO notes(body,title,category,analysis,recording_id) VALUES(?,?,?,?,?)',
+            (summary,decision.get('title') or 'Sprachnotiz',category,json.dumps(analysis,ensure_ascii=False),rid))
+        result['note_id']=cur.lastrowid
+    if decision['action']=='calendar':
+        eid=uuid.uuid4().hex
+        c.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',(eid,decision.get('title') or 'Termin',decision['start'],decision['end'],'Jarvis Sprache','Dauer: 30 Minuten (Standard)' if decision.get('default_duration') else 'Aus Spracheingabe'))
+        result['event_id']=eid
+    result['task_ids']=[]
+    for task in decision.get('tasks',[]):
+        body=task['body']+(' · Verantwortlich: '+task['owner'] if task.get('owner') else '')+(' · Terminhinweis: '+task['due'] if task.get('due') else '')
+        existing=c.execute('SELECT id FROM tasks WHERE body=? AND done=0',(body,)).fetchone()
+        tid=existing[0] if existing else c.execute('INSERT INTO tasks(body) VALUES(?)',(body,)).lastrowid
+        result['task_ids'].append(tid)
+    return result
+
+
+def review_voice(pid, accept, edits=None):
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        proposal=c.execute('SELECT * FROM voice_proposals WHERE id=?',(pid,)).fetchone()
+        if not proposal: raise ValueError('Vorschlag fehlt')
+        if proposal['state']!='pending': return {'state':proposal['state']}
+        decision=json.loads(proposal['payload'])
+        if edits:
+            for key,limit in [('title',200),('summary',2000),('category',80)]:
+                if key in edits: decision[key]=text(edits,key,limit)
+            if decision.get('category','Allgemein') not in ('Arbeit','Studium','Training','Investieren','Privat','Allgemein'): raise ValueError('Ungültiges Thema')
+        result=commit_voice(c,decision,proposal['recording_id']) if accept else decision
+        state='accepted' if accept else 'dismissed'
+        c.execute('UPDATE voice_proposals SET state=?,payload=? WHERE id=?',(state,json.dumps(result,ensure_ascii=False),pid))
+        result.update(state=state,proposal_id=pid,reply='Gespeichert.' if accept else 'Verworfen.')
+        c.execute('UPDATE voice_actions SET result=? WHERE recording_id=?',(json.dumps(result,ensure_ascii=False),proposal['recording_id']))
+        return result
+
+
 def apply_voice_action(rid, transcript, mode):
     existing=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
     if existing: return json.loads(existing[0]['result'])
-    record=rows('SELECT created,captured_at FROM recordings WHERE id=?',(rid,))
+    record=rows('SELECT created,captured_at,session_id FROM recordings WHERE id=?',(rid,))
+    session=record[0]['session_id'] if record else ''
     reference=(datetime.fromisoformat(record[0]['captured_at']).astimezone(ZURICH) if record[0]['captured_at'] else datetime.fromisoformat(record[0]['created']).replace(tzinfo=timezone.utc).astimezone(ZURICH)) if record else datetime.now(ZURICH)
-    decision=decide_voice(transcript,mode,ollama,settings()['model'],reference=reference)
+    normalized=re.sub(r'[.!?,]','',transcript.lower()).strip()
+    pending=rows("SELECT id FROM voice_proposals WHERE session_id=? AND state='pending' AND created>datetime('now','-30 minutes') ORDER BY id DESC LIMIT 1",(session,)) if session else []
+    if mode=='assistant' and pending and normalized in ('ja','ja bitte','ja speichern','ja bitte speichern','ja das passt','ja mach das','bestätige','bestätigen','speichern','nein','verwerfen','nein danke','nein nicht speichern'):
+        result=review_voice(pending[0]['id'],normalized not in ('nein','verwerfen','nein danke','nein nicht speichern'))
+        decision={'action':'answer','reply':result['reply'],'tasks':[]}
+    else:
+        history=VOICE_DIALOGUE.get(session,[]) if session else []
+        decision=decide_voice(transcript,mode,ollama,settings()['model'],reference=reference,history=history)
+        if session:
+            if len(VOICE_DIALOGUE)>50: VOICE_DIALOGUE.pop(next(iter(VOICE_DIALOGUE)))
+            VOICE_DIALOGUE[session]=(history+[{'user':transcript[:1500],'assistant':decision.get('reply','')[:1500]}])[-4:]
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         existing=c.execute('SELECT result FROM voice_actions WHERE recording_id=?',(rid,)).fetchone()
         if existing: return json.loads(existing[0])
-        if decision['action']=='note':
-            analysis={'title':decision['title'] or 'Sprachnotiz','category':'Allgemein',
-                'summary':decision['summary'] or transcript,'key_points':[], 'decisions':[],
-                'open_questions':['Terminangaben prüfen'] if decision.get('needs_review') else [],'tasks':[]}
-            cur=c.execute('INSERT INTO notes(body,title,category,analysis,recording_id) VALUES(?,?,?,?,?)',
-                (transcript,analysis['title'],'Allgemein',json.dumps(analysis,ensure_ascii=False),rid))
-            decision['note_id']=cur.lastrowid
-            if mode=='assistant' and not decision.get('needs_review'): decision['reply']='Notiz gespeichert.'
-        elif decision['action']=='calendar':
-            eid=uuid.uuid4().hex
-            c.execute('INSERT INTO events VALUES(?,?,?,?,?,?)',(eid,decision['title'] or 'Sprachtermin',decision['start'],decision['end'],'Jarvis Sprache',
-                transcript+'\n'+('Dauer automatisch: 30 Minuten.' if decision['default_duration'] else 'Dauer aus Spracheingabe.')))
-            decision['event_id']=eid
-            if mode=='assistant': decision['reply']='Im lokalen Jarvis-Kalender eingetragen.'+(' Dauer: 30 Minuten.' if decision['default_duration'] else '')
+        actionable=decision['action'] in ('note','calendar','task') or bool(decision.get('tasks'))
+        if actionable and mode=='assistant':
+            cur=c.execute('INSERT INTO voice_proposals(recording_id,session_id,payload) VALUES(?,?,?)',(rid,session,json.dumps(decision,ensure_ascii=False)))
+            decision['proposal_id']=cur.lastrowid
+            decision['state']='pending'
+            title=decision.get('title') or decision.get('summary') or 'Aufgaben'
+            task_text=' Aufgaben: '+', '.join(t['body'] for t in decision.get('tasks',[])) if decision.get('tasks') else ''
+            decision['reply']='Mein Vorschlag: '+title+'.'+task_text+' Soll ich das speichern?'
+        elif actionable:
+            decision=commit_voice(c,decision,rid)
+            decision['state']='accepted'
         if mode=='silent': decision['reply']=''
         c.execute('INSERT INTO voice_actions(recording_id,result) VALUES(?,?)',(rid,json.dumps(decision,ensure_ascii=False)))
+    if session and VOICE_DIALOGUE.get(session): VOICE_DIALOGUE[session][-1]['assistant']=decision.get('reply','')[:1500]
     return decision
 
 
@@ -354,7 +410,10 @@ def recording_worker():
                 try:
                     mode=rows('SELECT mode FROM recordings WHERE id=?',(rid,))[0]['mode']
                     if mode in ('assistant','silent'):
-                        apply_voice_action(rid,transcript,mode)
+                        action=apply_voice_action(rid,transcript,mode)
+                        if not action.get('keep_transcript'):
+                            with connect() as c: c.execute("UPDATE recordings SET transcript='' WHERE id=?",(rid,))
+                            (DATA/'recordings'/rid).unlink(missing_ok=True)
                     else:
                         save_protocol(transcript, summarize_transcript(transcript), rid)
                     with connect() as c:
@@ -405,10 +464,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send((ROOT/filename).read_bytes(), mime)
             if path == '/api/status':
                 return self.send(status())
+            if path == '/api/notes/overview':
+                archived=1 if q.get('archived',['0'])[0]=='1' else 0
+                term=q.get('q',[''])[0][:200]
+                return self.send(rows('SELECT category,count(*) AS count FROM notes WHERE archived=? AND (body || title || category || analysis) LIKE ? GROUP BY category ORDER BY category',(archived,'%'+term+'%')))
             if path == '/api/notes':
                 term = q.get('q', [''])[0][:200]
                 archived=1 if q.get('archived',['0'])[0]=='1' else 0
-                notes=rows('SELECT * FROM notes WHERE archived=? AND (body || title || category || analysis) LIKE ? ORDER BY pinned DESC,id DESC LIMIT 500', (archived,'%'+term+'%'))
+                category=q.get('category',[''])[0]
+                limit=max(1,min(500,int(q.get('limit',['500'])[0])));offset=max(0,int(q.get('offset',['0'])[0]))
+                notes=rows('SELECT * FROM notes WHERE archived=? AND (body || title || category || analysis) LIKE ? AND (?="" OR category=?) ORDER BY pinned DESC,id DESC LIMIT ? OFFSET ?', (archived,'%'+term+'%',category,category,limit,offset))
                 links=rows('SELECT note_id,signature FROM note_tasks')
                 for note in notes:
                     note['imported_tasks']=[r['signature'] for r in links if r['note_id']==note['id']]
@@ -427,6 +492,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM training ORDER BY day DESC,id DESC LIMIT 1000'))
             if path == '/api/holdings':
                 return self.send(rows('SELECT * FROM holdings ORDER BY id DESC LIMIT 3000'))
+            if path == '/api/voice/proposals':
+                items=rows("SELECT * FROM voice_proposals WHERE state='pending' ORDER BY id DESC LIMIT 100")
+                for item in items: item['payload']=json.loads(item['payload'])
+                return self.send(items)
             if path == '/api/voice/actions':
                 entries=rows('SELECT v.recording_id,v.result,v.created,r.transcript,r.mode FROM voice_actions v JOIN recordings r ON r.id=v.recording_id ORDER BY v.created DESC,v.rowid DESC LIMIT 100')
                 for item in entries: item['result']=json.loads(item['result'])
@@ -438,13 +507,13 @@ class Handler(BaseHTTPRequestHandler):
                 actions=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
                 return self.send({**records[0],'result':json.loads(actions[0]['result']) if actions else None})
             if path == '/api/recordings':
-                return self.send(rows('SELECT * FROM recordings ORDER BY created DESC,rowid DESC LIMIT 100'))
+                return self.send(rows("SELECT * FROM recordings WHERE mode='protocol' OR transcript!='' AND status='done' ORDER BY created DESC,rowid DESC LIMIT 100"))
             if path == '/api/bees/local':
                 return self.send(local_bees())
             if path == '/api/bees':
                 return self.send(rows("SELECT * FROM imports WHERE kind='bees' ORDER BY id DESC LIMIT 20"))
             if path == '/api/export':
-                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks','voice_actions']
+                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks','voice_actions','voice_proposals']
                 with connect() as c:
                     data = {t:[dict(r) for r in c.execute('SELECT * FROM '+t)] for t in tables}
                 return self.send(dict(version=VERSION, exported=now(), data=data), attachment='jarvis-export.json')
@@ -547,6 +616,9 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError('Ungültiges Thema')
                     c.execute('UPDATE notes SET title=?,category=? WHERE id=?',(title,category,nid))
             return self.send({'ok':True})
+        if path == '/api/voice/review':
+            if not isinstance(b.get('accept'),bool): raise ValueError('Bestätigung fehlt')
+            return self.send(review_voice(int(b['id']),b['accept'],b))
         if path == '/api/notes':
             with connect() as c:
                 category=text(b,'category',80,False) or 'Allgemein'
@@ -608,6 +680,7 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError('Stimme konnte nicht erzeugt werden')
             return self.send(result.stdout,'audio/wav')
         if path == '/api/recordings':
+            session_id=text(b,'session_id',64,False)
             mode=text(b,'mode',20,False) or 'protocol'
             if mode not in ('protocol','assistant','silent'): raise ValueError('Ungültiger Sprachmodus')
             captured=text(b,'captured_at',80,False)
@@ -632,7 +705,7 @@ class Handler(BaseHTTPRequestHandler):
             directory.mkdir(exist_ok=True)
             (directory/rid).write_bytes(raw)
             with connect() as c:
-                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at,client_key) VALUES(?,?,?,?,?,?)',(rid,'saved',mime,mode,captured,client_key))
+                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at,client_key,session_id) VALUES(?,?,?,?,?,?,?)',(rid,'saved',mime,mode,captured,client_key,session_id))
             return self.send({'ok':True,'id':rid})
         if path == '/api/transcribe':
             rid = text(b,'id',32)

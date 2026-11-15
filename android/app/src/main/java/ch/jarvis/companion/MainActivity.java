@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
                     String action=uri.getHost();
                     if("stop".equals(action))stopService(new Intent(MainActivity.this,ListeningService.class));
                     else if("setup".equals(action))startActivity(new Intent(MainActivity.this,VoiceSettingsActivity.class));
-                    else if("wake".equals(action)||"silent".equals(action))activate("wake".equals(action)?"assistant":"silent");
+                    else if("talk".equals(action)||"wake".equals(action)||"silent".equals(action))activate("talk".equals(action)?"talk":"wake".equals(action)?"assistant":"silent");
                     return true;
                 }
                 if(trusted(uri.toString()))return false;
@@ -104,7 +104,7 @@ public class MainActivity extends Activity {
         if("assistant".equals(mode)&&!WakeModel.ready(this)){Toast.makeText(this,"Einmal das Hey-Jarvis-Modell unter Sprache einrichten installieren.",Toast.LENGTH_LONG).show();startActivity(new Intent(this,VoiceSettingsActivity.class));return;}
         if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},61);return;}
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},62);return;}
-        try{startForegroundService(new Intent(this,ListeningService.class).putExtra("mode",mode).putExtra("minutes",30));}catch(Exception e){Toast.makeText(this,"Zuhören konnte nicht gestartet werden.",Toast.LENGTH_LONG).show();}
+        try{startForegroundService(new Intent(this,ListeningService.class).setAction("talk".equals(mode)?"talk":"start").putExtra("mode","talk".equals(mode)?"assistant":mode).putExtra("minutes",30));}catch(Exception e){Toast.makeText(this,"Zuhören konnte nicht gestartet werden.",Toast.LENGTH_LONG).show();}
     }
     @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==70&&pendingFile!=null){pendingFile.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));pendingFile=null;}}
     private void showSetup(){
