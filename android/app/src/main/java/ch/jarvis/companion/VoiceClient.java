@@ -12,11 +12,11 @@ final class VoiceClient {
     static String readText(java.nio.file.Path path)throws IOException{return new String(Files.readAllBytes(path),StandardCharsets.UTF_8);}
     static void writeText(java.nio.file.Path path,String value)throws IOException{Files.write(path,value.getBytes(StandardCharsets.UTF_8));}
     static String base(Context context) throws Exception {
-        String value=context.getSharedPreferences("voice",0).getString("url","");
-        URI u=new URI(value);
-        if(!"https".equals(u.getScheme())||u.getHost()==null||!u.getHost().endsWith(".ts.net")||u.getPort()!=-1||u.getRawUserInfo()!=null||u.getRawQuery()!=null||u.getRawFragment()!=null||!u.getPath().isEmpty())throw new IOException("Tailscale-Adresse zuerst in der App speichern.");
+        String value=JarvisAddress.normalize(context.getSharedPreferences("voice",0).getString("url",""));
+        context.getSharedPreferences("voice",0).edit().putString("url",value).apply();
         return value;
     }
+
     static byte[] request(String base,String endpoint,JSONObject body,String token,int timeout) throws Exception {
         HttpURLConnection c=(HttpURLConnection)new URL(base+endpoint).openConnection();
         c.setConnectTimeout(15000);c.setReadTimeout(timeout);c.setInstanceFollowRedirects(false);

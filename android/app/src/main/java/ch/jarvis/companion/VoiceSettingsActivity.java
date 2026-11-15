@@ -96,10 +96,9 @@ public class VoiceSettingsActivity extends Activity {
     }
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==20||code==21){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)listen(listenMode);else message("Mikrofon und sichtbare Benachrichtigungen sind für Zuhören erforderlich.");return;}if(code==10&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)record();else if(code==11){try{startForegroundService(new Intent(this,RecorderService.class));}catch(Exception e){message("Aufnahme konnte nicht gestartet werden.");}}}
     private String baseUrl() throws Exception {
-        String raw=address.getText().toString().trim().replaceAll("/+$","");URI uri=new URI(raw);
-        if(!"https".equals(uri.getScheme())||uri.getHost()==null||!uri.getHost().endsWith(".ts.net")||uri.getPort()!=-1||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||!uri.getPath().isEmpty())throw new Exception("Nur deine vollständige HTTPS-Tailscale-Adresse ohne Pfad verwenden.");
-        return raw;
+        return JarvisAddress.normalize(address.getText().toString());
     }
+
     private void refreshFiles(){
         File dir=new File(getFilesDir(),"recordings");File[] recordings=dir.listFiles((d,name)->name.endsWith(".m4a"));files.removeAllViews();if(recordings==null)return;Arrays.sort(recordings,(a,b)->b.getName().compareTo(a.getName()));
         for(File f:recordings){TextView label=new TextView(this);boolean uploaded=new File(f.getPath()+".uploaded").exists();label.setText(f.getName()+" · "+(uploaded?"auf Laptop gespeichert":"auf Handy gespeichert"));files.addView(label);if(!uploaded)addButton(files,"An Laptop senden",()->upload(f));}

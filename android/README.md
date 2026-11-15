@@ -49,3 +49,9 @@ Automatische Termine werden ausschliesslich lokal in Jarvis erstellt. Vorerst ve
 
 ## v0.2.1: Bisheriges Dashboard als Startoberfläche
 Die App öffnet direkt die bekannte vom Laptop gelieferte Jarvis-Oberfläche. Die native Einstellungs-/Recorderliste ist keine neue Startseite mehr. Im bisherigen Bereich Transkripte erscheinen bei Nutzung dieser Android-App die Schaltflächen Hey Jarvis, Still zuhören, Stoppen und Sprache einrichten. Die Mikrofonfunktionen laufen weiterhin als native Vordergrunddienste. Website und Browser-/PWA-Startbildschirm behalten ihr bisheriges Layout; die Hintergrundfunktionen benötigen die Android-Hülle. Kein neues App-Paket: `ch.jarvis.companion` bleibt gleich.
+
+
+## v0.3.0: Einheitliche Android-App
+Das Launcher-Symbol entspricht `icon.svg`, Startseite ist das vorhandene Webdashboard. Die Verbindungseinrichtung ergänzt HTTPS automatisch und zeigt Eingabefehler direkt im Formular. Adressen mit Pfad, fremde Domains und Zugangsdaten werden abgelehnt. Systemleisten werden bei der Darstellung berücksichtigt. Die Android-Tests prüfen die Adressnormalisierung; GitHub Actions führt sie vor dem APK-Build aus. Ein Cache hält künftig den Entwicklungssignaturschlüssel für Updates innerhalb dieser Buildlinie stabil, soweit der Cache verfügbar bleibt. Frühere Prototypen können eine andere Signatur haben. Beim Installationskonflikt zuerst lokale Aufnahmen sichern und nicht ungeprüft deinstallieren. Kein Ersatz für spätere Release-Signierung.
+
+Der GitHub-Artefaktname lautet `jarvis-android`. ZIP öffnen und `app-debug.apk` installieren. Serveraktualisierung separat über `git pull --ff-only` und `bash start.sh`. Reale Pixel-Aufnahme, Sperrbildschirm und Akkulaufzeit bleiben Gerätetests.

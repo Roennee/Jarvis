@@ -9,6 +9,9 @@ import android.net.Uri;
 import android.os.*;
 import android.webkit.*;
 import android.widget.*;
+import android.view.View;
+import android.view.WindowInsets;
+import android.graphics.Insets;
 import java.net.URI;
 import org.json.JSONObject;
 
@@ -63,7 +66,16 @@ public class MainActivity extends Activity {
                 if(request.isForMainFrame()){Toast.makeText(MainActivity.this,"Jarvis nicht erreichbar. Tailscale und Laptop prüfen.",Toast.LENGTH_LONG).show();showSetup();}
             }
         });
-        web.setWebChromeClient(new WebChromeClient(){
+
+        web.setDownloadListener((url,agent,disposition,mime,length)->{if(trusted(url)){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(Exception ignored){}}});
+        FrameLayout frame=new FrameLayout(this);frame.setBackgroundColor(Color.rgb(11,17,23));frame.addView(web,new FrameLayout.LayoutParams(-1,-1));
+        ProgressBar progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);frame.addView(progress,new FrameLayout.LayoutParams(-1,6));
+        web.setWebChromeClient(createChromeClient(progress));
+        applyInsets(frame);setContentView(frame);web.loadUrl(origin+"/");
+    }
+    private WebChromeClient createChromeClient(ProgressBar progress){
+        return new WebChromeClient(){
+            @Override public void onProgressChanged(WebView view,int value){progress.setProgress(value);progress.setVisibility(value==100?View.GONE:View.VISIBLE);}
             @Override public boolean onShowFileChooser(WebView view,ValueCallback<Uri[]> callback,FileChooserParams params){
                 if(!trusted(view.getUrl()))return false;
                 if(pendingFile!=null)pendingFile.onReceiveValue(null);pendingFile=callback;
@@ -77,9 +89,15 @@ public class MainActivity extends Activity {
                 else {pendingMicrophone=request;requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},60);}
             });}
             @Override public void onPermissionRequestCanceled(PermissionRequest request){if(pendingMicrophone==request)pendingMicrophone=null;}
+        };
+    }
+    private void applyInsets(View root){
+        final int l=root.getPaddingLeft(),t=root.getPaddingTop(),r=root.getPaddingRight(),b=root.getPaddingBottom();
+        root.setOnApplyWindowInsetsListener((view,insets)->{
+            if(Build.VERSION.SDK_INT>=30){Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());view.setPadding(l+bars.left,t+bars.top,r+bars.right,b+bars.bottom);}
+            else view.setPadding(l+insets.getSystemWindowInsetLeft(),t+insets.getSystemWindowInsetTop(),r+insets.getSystemWindowInsetRight(),b+insets.getSystemWindowInsetBottom());
+            return insets;
         });
-        web.setDownloadListener((url,agent,disposition,mime,length)->{if(trusted(url)){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(Exception ignored){}}});
-        setContentView(web);web.loadUrl(origin+"/");
     }
     private void activate(String mode){
         requestedMode=mode;
@@ -93,8 +111,10 @@ public class MainActivity extends Activity {
         LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setPadding(35,70,35,35);layout.setBackgroundColor(Color.rgb(11,18,24));
         TextView title=new TextView(this);title.setText("Jarvis verbinden");title.setTextColor(Color.WHITE);title.setTextSize(24);layout.addView(title);
         TextView text=new TextView(this);text.setText("Einmal deine bisherige HTTPS-Tailscale-Adresse speichern. Danach öffnet sich direkt deine gewohnte Jarvis-Oberfläche.");text.setTextColor(Color.WHITE);layout.addView(text);
-        EditText address=new EditText(this);address.setTextColor(Color.WHITE);address.setSingleLine(true);address.setHint("https://dein-laptop.dein-netz.ts.net");address.setText(getSharedPreferences("voice",0).getString("url",""));layout.addView(address);
-        Button save=new Button(this);save.setText("Jarvis öffnen");save.setOnClickListener(v->{String raw=address.getText().toString().trim().replaceAll("/+$","");getSharedPreferences("voice",0).edit().putString("url",raw).apply();try{VoiceClient.base(this);openDashboard();}catch(Exception e){Toast.makeText(this,e.getMessage(),Toast.LENGTH_LONG).show();}});layout.addView(save);setContentView(layout);
+        EditText address=new EditText(this);address.setTextColor(Color.WHITE);address.setSingleLine(true);address.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_URI);address.setHint("laptop.tailnetz.ts.net");address.setText(getSharedPreferences("voice",0).getString("url",""));layout.addView(address);
+        TextView error=new TextView(this);error.setTextColor(Color.rgb(255,180,160));layout.addView(error);
+        Button save=new Button(this);save.setText("Jarvis öffnen");save.setOnClickListener(v->{try{String raw=JarvisAddress.normalize(address.getText().toString());getSharedPreferences("voice",0).edit().putString("url",raw).apply();openDashboard();}catch(Exception e){error.setText(e.getMessage());}});layout.addView(save);
+        TextView help=new TextView(this);help.setText("Tailscale auf dem Pixel einschalten. Laptop und Jarvis-Server müssen laufen. https:// wird automatisch ergänzt.");help.setTextColor(Color.LTGRAY);layout.addView(help);applyInsets(layout);setContentView(layout);
     }
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results){super.onRequestPermissionsResult(code,permissions,results);if(code==61||code==62){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)activate(requestedMode);return;}if(code==60&&pendingMicrophone!=null){if(results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED&&web!=null&&trusted(web.getUrl()))pendingMicrophone.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});else pendingMicrophone.deny();pendingMicrophone=null;}}
     @Override protected void onResume(){super.onResume();handler.removeCallbacks(refresh);handler.post(refresh);}
