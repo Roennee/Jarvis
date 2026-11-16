@@ -76,3 +76,21 @@ Für den Übergang von einer alten, anders signierten Installation kann eine ein
 
 
 Server v0.8 ändert die Ablageregel in beiden Modi auf Vorschläge mit Bestätigung. Das vorhandene Android-Paket kann dieselbe aktualisierte Oberfläche laden; für diese Änderung ist kein neues APK nötig. Schweizerdeutsches Sprachprofil und der lokale Lernbereich werden auf dem Laptop eingerichtet. Akustisches Training ist ein expliziter GPU-Schritt, keine automatische Eigenschaft des Mitschreibens.
+
+### Rauschminderung (0.4.3)
+
+Der Zuhörmodus aktiviert den vorhandenen Android-NoiseSuppressor an seiner eigenen
+AudioRecord-Sitzung und deaktiviert die optionale automatische Verstärkung, damit
+Sprechpausen nicht hochgeregelt werden. Effekte sind geräteabhängig; Fehler oder
+fehlende Effekte verhindern keine Aufnahme. Die tatsächlich gemeldeten Zustände
+stehen im Android-Log unter `JarvisAudio`. Effekte werden beim Beenden freigegeben.
+Die separate manuelle Aufnahme nutzt mono und die Sprachaufnahmequelle.
+
+Die Web-Aufnahme fordert mono, Rausch- und Echounterdrückung sowie abgeschaltete
+automatische Verstärkung an (optionale Browser-Einstellungen). Bei ausdrücklich
+gemeldeter Abweichung erscheint ein Hinweis während der Aufnahme.
+
+Gerätetest: ohne Bluetooth-Headset 5 Sekunden schweigen, danach 10 Sekunden normal
+Schweizerdeutsch sprechen. Web-Aufnahme und Stillmodus getrennt prüfen, danach
+eine zweite Sitzung starten und Stoppen prüfen. Aufnahmequalität und Erkennung
+müssen auf dem echten Gerät verglichen werden; CI kann sie nicht nachweisen.

@@ -29,9 +29,10 @@ public class RecorderService extends Service {
             File dir=new File(getFilesDir(),"recordings");dir.mkdirs();
             working=new File(dir,System.currentTimeMillis()+".pending");
             recorder=Build.VERSION.SDK_INT>=31?new MediaRecorder(this):new MediaRecorder();
-            recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+            recorder.setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION);
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+            recorder.setAudioChannels(1);
             recorder.setAudioSamplingRate(16000);
             recorder.setAudioEncodingBitRate(64000);
             recorder.setOutputFile(working.getAbsolutePath());

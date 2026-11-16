@@ -73,7 +73,7 @@ public class ListeningService extends Service {
         return START_NOT_STICKY;
     }
     private void listen(long duration){
-        Model model=null;Recognizer recognizer=null;AudioRecord audio=null;
+        Model model=null;Recognizer recognizer=null;AudioRecord audio=null;CaptureEffects effects=null;
         ByteArrayOutputStream utterance=new ByteArrayOutputStream();
         byte[] previous=new byte[0];boolean capturing=false;int voiced=0,silence=0;long triggered=0;
         final int sampleRate=16000;long deadline=SystemClock.elapsedRealtime()+duration;
@@ -83,6 +83,7 @@ public class ListeningService extends Service {
             audio=new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION,sampleRate,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT,size);
             microphone=audio;
             if(audio.getState()!=AudioRecord.STATE_INITIALIZED)throw new IOException("Mikrofon konnte nicht geöffnet werden");
+            effects=new CaptureEffects(audio.getAudioSessionId());
             audio.startRecording();byte[] buffer=new byte[3200];
             status="silent".equals(mode)?"Still zuhören aktiv":"Bereit für Hey Jarvis";
             while(running&&SystemClock.elapsedRealtime()<deadline){
@@ -120,6 +121,7 @@ public class ListeningService extends Service {
         }catch(Exception e){if(running)status="Zuhören beendet: "+e.getMessage();}
         finally{
             running=false;active=false;
+            if(effects!=null)effects.close();
             if(audio!=null){try{audio.stop();}catch(Exception ignored){}audio.release();}microphone=null;
             if(recognizer!=null)recognizer.close();if(model!=null)model.close();
             if(wake!=null&&wake.isHeld())wake.release();
