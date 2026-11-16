@@ -63,3 +63,13 @@ Jetzt sprechen im Dashboard startet ohne Rufwort. Hey Jarvis bestätigt eine erf
 
 ## v0.4.1: Direkte Rückmeldungen
 Nach einer längeren ausstehenden Verarbeitung spricht die lokale Offline-Stimme einmal „Lass mich kurz nachdenken“. Im Stillmodus bleibt alles lautlos. Antworten nutzen standardmässig dieselbe schnelle Gerätestimme; in Sprache einrichten kann auf die bisherige Serverstimme zurückgeschaltet werden. Die Erkennung einer Sprechpause ist im Gespräch auf eine Sekunde verkürzt. Ergebnisabfragen erfolgen häufiger. Bei langen Denkzeiten des kleinen Laptop-Modells kann weiterhin eine deutliche Pause entstehen. Gerätetest: kurze Frage, langsame Aufgabe, danach Stillmodus; auf abgeschnittene Satzpausen und verspätete Wartehinweise achten.
+
+
+## v0.4.2: dauerhaft signierte Updates
+Die alte Cache-Lösung war in den überprüften CI-Läufen wirkungslos: Cache miss, neuer Debug-Schlüssel pro Build. Für Updates braucht Android denselben Signaturschlüssel. APK-Dateien aus diesen früheren Builds sind daher nicht zuverlässig gegenseitig aktualisierbar. Ein Cache ist keine dauerhafte Schlüsselsicherung.
+
+Auf dem Laptop einmal `bash setup-android-signing.sh` ausführen. Voraussetzungen: OpenSSL, base64 und angemeldete GitHub CLI mit Recht, Repository-Actions-Secrets zu setzen. Das Skript erzeugt einen privaten PKCS12-Schlüssel im lokalen Benutzer-Datenordner, lädt Keystore und Passwort in zwei GitHub Actions Secrets und startet den Build. Es gibt keine Geheimnisse auf stdout aus und legt keinen Schlüssel im Repository ab. Beide lokalen Sicherungsdateien gemeinsam schützen und sichern. Vorhandene Schlüssel werden wiederverwendet, nicht rotiert.
+
+GitHub Actions signiert künftig mit diesem Schlüssel und prüft die APK-Signatur. Fehlen die Secrets, laufen Tests/Compilation, aber es wird absichtlich keine installierbare APK veröffentlicht. Lokale Entwickler-Builds ohne die Umgebungsvariablen bleiben kurzlebige Debug-Builds und dürfen nicht als Update verteilt werden.
+
+Für den Übergang von einer alten, anders signierten Installation kann eine einmalige Neuinstallation erforderlich sein. Vorher gespeicherte/ausstehende Aufnahmen an den Laptop senden und erfolgreiche Verarbeitung kontrollieren. Chats und Notizen auf dem Laptop sind getrennt vom App-Speicher, aber ungesendetes Audio und heruntergeladene Wakeword-Dateien auf dem Pixel gehen beim Deinstallieren verloren. Alten Schlüssel aus einer öffentlichen APK kann man nicht rekonstruieren.

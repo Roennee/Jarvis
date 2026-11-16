@@ -6,8 +6,24 @@ android {
         applicationId 'ch.jarvis.companion'
         minSdk 29
         targetSdk 35
-        versionCode 6
-        versionName '0.4.1'
+        versionCode 7
+        versionName '0.4.2'
+    }
+    signingConfigs {
+        stable {
+            if (System.getenv('JARVIS_ANDROID_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('JARVIS_ANDROID_KEYSTORE_PATH'))
+                storeType 'PKCS12'
+                storePassword System.getenv('JARVIS_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'jarvis'
+                keyPassword System.getenv('JARVIS_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (System.getenv('JARVIS_ANDROID_KEYSTORE_PATH')) signingConfig signingConfigs.stable
+        }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
