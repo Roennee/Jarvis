@@ -124,3 +124,20 @@ Für reine Gesprächsantworten fordert der Prompt nur action/reply statt ausfüh
 
 
 Android-Update-Signierung: Einmal `bash setup-android-signing.sh` auf dem Laptop ausführen (GitHub CLI muss angemeldet sein). Der private Schlüssel bleibt ausserhalb von Git und wird als verschlüsseltes GitHub Actions Secret verwendet. Ohne Signierungs-Secrets gibt CI keine neue APK mehr aus. Details und Sicherungshinweise: android/README.md.
+
+
+## v0.8: Schweizerdeutsch und persönlicher Lernablauf
+Die aktuelle Regel ersetzt die frühere automatische Ablage: In BEIDEN Sprachmodi entstehen nur Vorschläge. Aufgaben, Termine und Notizen werden erst nach Annehmen in die eigentliche Ablage übernommen. Stillmodus bleibt lautlos. Abgelehnte Vorschläge werden nicht ausgeführt.
+
+Schweizerdeutscher ASR-Kandidat: `gcoli/whisper-large-v3-turbo-swiss-german-mit`, fixierter Stand `540fb2e7a9135048963c5de9822579c96f8962e5`, CT2-Unterordner, laut Modellkarte MIT. Das Modell übersetzt gesprochenen Dialekt in Standarddeutsch. Die Modellkarte weist darauf hin, dass spontane Gespräche/noisy Audio nicht gemessen wurden; deren Qualität auf dem Surface ist offen. Modell: https://huggingface.co/gcoli/whisper-large-v3-turbo-swiss-german-mit
+
+Nach Installation der bestehenden Python-Umgebung: `python setup-swiss-speech.py --activate`. Der Download erfolgt nur auf ausdrücklichen Start dieses Skripts, nicht beim normalen Sprechen. Grosser Download und zusätzliche CPU-/RAM-Last; keine Garantie schneller Antworten auf 8 GB RAM. Danach Jarvis neu starten. Bei Bedarf unter Einstellungen auf das vorherige kleine Sprachprofil zurückwechseln. Keine externen Audiodienste aktiviert.
+
+### Persönlich lernen
+Unter Sprechen im aufgeklappten Aufnahmebereich „Lernaufnahme: ausschliesslich meine eigene Stimme“ wählen, eine kurze eigene Aufnahme von 1–30 Sekunden aufnehmen/importieren, hochladen und verarbeiten. Im Bereich „Jarvis lernt meine Sprache“ anhören, richtigen Inhalt auf Hochdeutsch korrigieren und eigene Namen/Fachwörter bestätigen. Audio, Erkennung und Korrektur bleiben lokal; keine automatische Übernahme fremder Gesprächsstimmen. Bestätigte Wörter werden beim nächsten Erkennen als Prompt-Hilfe genutzt. Das ist lexikalische Anpassung, keine Änderung der akustischen Modellgewichte und keine garantierte Verbesserung. Löschen entfernt das Lernbeispiel und seine Aufnahme aus der Sammlung.
+
+`python train-personal-speech.py --export-only` erzeugt lokal unter `private/speech-training` train/validation-Manifeste. Für tatsächliches LoRA-Training mindestens 30 geprüfte eigene Clips und mindestens zehn unterschiedliche Sätze sammeln. Der explizit gewählte Trainingsrechner benötigt eine CUDA-GPU und `requirements-speech-training.txt`. Training: `python train-personal-speech.py`. Es läuft nicht automatisch auf dem Surface und wird nicht in eine Cloud gestartet. Der Hugging-Face-Download enthält nur öffentliche Modellgewichte; Trainingsaudio wird vom Skript nicht hochgeladen.
+
+`python evaluate-personal-speech.py` vergleicht den Kandidaten mit dem bisherigen persönlichen Modell oder Swiss-Basismodell auf zurückgehaltenen Clips. `--activate` übernimmt ihn nur bei geringerer Wortfehlerrate ohne Verschlechterung einzelner Prüfclips. Der Prüfdatensatz wird nach ausreichender Sammlung eingefroren, und identische korrigierte Sätze bleiben zwischen Training und Prüfung getrennt. Auch bestandene kleine Prüfungen garantieren keine Verbesserung in allen realen Gesprächen. GPU-Training und Schweizerdeutsch-Qualität wurden hier mangels GPU und persönlicher Sprachaufnahmen NICHT ausgeführt oder validiert. Es gibt noch kein auf Raffaels Stimme trainiertes Modell.
+
+Sprachprofile „base“, „swiss“, „personal“ bleiben auswählbar; nicht vorhandene Modelle können nicht aktiviert werden. Ein schlechtes Training wird nicht stillschweigend ausgerollt. Bereits gespeicherte frühere Notizen/Aufgaben werden durch die neue Vorschlagsregel nicht rückwirkend verändert.

@@ -27,6 +27,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from zoneinfo import ZoneInfo
 from voice_actions import decide as decide_voice
+from speech_profile import model_path as speech_model_path, ready as speech_ready, prompt as speech_prompt
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('JARVIS_DATA_DIR', str(ROOT))).resolve()
@@ -46,7 +47,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.7.1'
+VERSION = '0.8.0'
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -61,7 +62,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 9:
+        if old_version < 10:
             backup()
     with connect() as c:
         c.executescript('''
@@ -108,7 +109,8 @@ def init():
         c.execute("CREATE TABLE IF NOT EXISTS voice_proposals(id INTEGER PRIMARY KEY,recording_id TEXT UNIQUE,session_id TEXT,payload TEXT,state TEXT DEFAULT 'pending',created TEXT DEFAULT CURRENT_TIMESTAMP)")
         if 'timings' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
             c.execute("ALTER TABLE recordings ADD COLUMN timings TEXT DEFAULT '{}'")
-        c.execute('PRAGMA user_version=9')
+        c.execute("CREATE TABLE IF NOT EXISTS speech_samples(recording_id TEXT PRIMARY KEY,original TEXT DEFAULT '',corrected TEXT DEFAULT '',own_voice INTEGER DEFAULT 0,words TEXT DEFAULT '',duration REAL DEFAULT 0,created TEXT DEFAULT CURRENT_TIMESTAMP)")
+        c.execute('PRAGMA user_version=10')
 
 
 def rows(sql, args=()):
@@ -117,7 +119,7 @@ def rows(sql, args=()):
 
 
 def settings():
-    result = {'model': 'qwen3:1.7b', 'glossary': '', 'context': False}
+    result = {'model': 'qwen3:1.7b', 'glossary': '', 'context': False, 'speech_profile':'base'}
     for r in rows('SELECT key,value FROM settings'):
         result[r['key']] = json.loads(r['value'])
     return result
@@ -166,7 +168,7 @@ def piper_ready():
 
 
 def stt_ready():
-    return importlib.util.find_spec('faster_whisper') is not None and all((ROOT/'models'/'whisper-base'/name).is_file() for name in ('model.bin','config.json','tokenizer.json'))
+    return importlib.util.find_spec('faster_whisper') is not None and speech_ready(ROOT,settings()['speech_profile'])
 
 
 def status():
@@ -177,7 +179,7 @@ def status():
     except (OSError, ValueError):
         online, models = False, []
     return dict(version=VERSION, online=online, models=models, settings=settings(),
-        voice=piper_ready() or bool(shutil.which('espeak-ng')), voice_engine='piper' if piper_ready() else 'espeak' if shutil.which('espeak-ng') else 'missing', transcription=stt_ready(),
+        speech_profiles={name:speech_ready(ROOT,name) for name in ('base','swiss','personal')}, voice=piper_ready() or bool(shutil.which('espeak-ng')), voice_engine='piper' if piper_ready() else 'espeak' if shutil.which('espeak-ng') else 'missing', transcription=stt_ready(),
         calendar_import=importlib.util.find_spec('icalendar') is not None and importlib.util.find_spec('recurring_ical_events') is not None,
         remote=REMOTE, timezone='Europe/Zurich', csrf=CSRF, calendars={'google': (DATA/'private'/'google-token.json').exists(), 'microsoft': (DATA/'private'/'microsoft-cache.json').exists()})
 
@@ -373,16 +375,13 @@ def apply_voice_action(rid, transcript, mode):
         existing=c.execute('SELECT result FROM voice_actions WHERE recording_id=?',(rid,)).fetchone()
         if existing: return json.loads(existing[0])
         actionable=decision['action'] in ('note','calendar','task') or bool(decision.get('tasks'))
-        if actionable and mode=='assistant':
+        if actionable:
             cur=c.execute('INSERT INTO voice_proposals(recording_id,session_id,payload) VALUES(?,?,?)',(rid,session,json.dumps(decision,ensure_ascii=False)))
             decision['proposal_id']=cur.lastrowid
             decision['state']='pending'
             title=decision.get('title') or decision.get('summary') or 'Aufgaben'
             task_text=' Aufgaben: '+', '.join(t['body'] for t in decision.get('tasks',[])) if decision.get('tasks') else ''
             decision['reply']='Mein Vorschlag: '+title+'.'+task_text+' Soll ich das speichern?'
-        elif actionable:
-            decision=commit_voice(c,decision,rid)
-            decision['state']='accepted'
         if mode=='silent': decision['reply']=''
         c.execute('INSERT INTO voice_actions(recording_id,result) VALUES(?,?)',(rid,json.dumps(decision,ensure_ascii=False)))
     if session and VOICE_DIALOGUE.get(session): VOICE_DIALOGUE[session][-1]['assistant']=decision.get('reply','')[:1500]
@@ -402,8 +401,9 @@ def recording_worker():
                     ollama('/api/generate', {'model': settings()['model'], 'keep_alive': 0}, timeout=30)
                 except Exception:
                     pass
-                cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(ROOT/'models'/'whisper-base')]
-                env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_GLOSSARY': settings()['glossary']}
+                cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(speech_model_path(ROOT,settings()['speech_profile']))]
+                learned=[word.strip() for item in rows("SELECT words FROM speech_samples WHERE own_voice=1 AND corrected!='' ORDER BY created DESC LIMIT 50") for word in item['words'].split(',')]
+                env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_GLOSSARY':speech_prompt(settings()['glossary'],learned)}
                 stt_start=time.monotonic()
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
                 if result.returncode:
@@ -419,6 +419,8 @@ def recording_worker():
                         if not action.get('keep_transcript'):
                             with connect() as c: c.execute("UPDATE recordings SET transcript='' WHERE id=?",(rid,))
                             (DATA/'recordings'/rid).unlink(missing_ok=True)
+                    elif mode=='training':
+                        with connect() as c:c.execute('INSERT OR REPLACE INTO speech_samples(recording_id,original,duration) VALUES(?,?,?)',(rid,transcript,float(json.loads(result.stdout.strip().splitlines()[-1]).get('duration',0))))
                     else:
                         save_protocol(transcript, summarize_transcript(transcript), rid)
                     with connect() as c:
@@ -498,6 +500,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM training ORDER BY day DESC,id DESC LIMIT 1000'))
             if path == '/api/holdings':
                 return self.send(rows('SELECT * FROM holdings ORDER BY id DESC LIMIT 3000'))
+            if path == '/api/speech/samples':
+                return self.send(rows('SELECT * FROM speech_samples ORDER BY created DESC LIMIT 100'))
             if path == '/api/voice/proposals':
                 items=rows("SELECT * FROM voice_proposals WHERE state='pending' ORDER BY id DESC LIMIT 100")
                 for item in items: item['payload']=json.loads(item['payload'])
@@ -514,13 +518,13 @@ class Handler(BaseHTTPRequestHandler):
                 actions=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
                 return self.send({**records[0],'timings':json.loads(records[0]['timings'] or '{}'),'result':json.loads(actions[0]['result']) if actions else None})
             if path == '/api/recordings':
-                return self.send(rows("SELECT * FROM recordings WHERE mode='protocol' OR transcript!='' AND status='done' ORDER BY created DESC,rowid DESC LIMIT 100"))
+                return self.send(rows("SELECT * FROM recordings WHERE mode IN ('protocol','training') OR transcript!='' AND status='done' ORDER BY created DESC,rowid DESC LIMIT 100"))
             if path == '/api/bees/local':
                 return self.send(local_bees())
             if path == '/api/bees':
                 return self.send(rows("SELECT * FROM imports WHERE kind='bees' ORDER BY id DESC LIMIT 20"))
             if path == '/api/export':
-                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks','voice_actions','voice_proposals']
+                tables = ['notes','tasks','chats','messages','events','training','holdings','recordings','corrections','imports','settings','note_tasks','voice_actions','voice_proposals','speech_samples']
                 with connect() as c:
                     data = {t:[dict(r) for r in c.execute('SELECT * FROM '+t)] for t in tables}
                 return self.send(dict(version=VERSION, exported=now(), data=data), attachment='jarvis-export.json')
@@ -623,6 +627,29 @@ class Handler(BaseHTTPRequestHandler):
                         raise ValueError('Ungültiges Thema')
                     c.execute('UPDATE notes SET title=?,category=? WHERE id=?',(title,category,nid))
             return self.send({'ok':True})
+        if path == '/api/speech/profile':
+            profile=text(b,'profile',30)
+            if profile not in ('base','swiss','personal') or not speech_ready(ROOT,profile): raise ValueError('Sprachmodell nicht installiert. Zuerst auf dem Laptop einrichten.')
+            write_setting('speech_profile',profile)
+            return self.send({'ok':True})
+        if path == '/api/speech/delete':
+            rid=text(b,'id',32)
+            with connect() as c:
+                if not c.execute('SELECT recording_id FROM speech_samples WHERE recording_id=?',(rid,)).fetchone(): raise ValueError('Lernbeispiel fehlt')
+                c.execute('DELETE FROM speech_samples WHERE recording_id=?',(rid,))
+                c.execute("DELETE FROM recordings WHERE id=? AND mode='training'",(rid,))
+            if re.fullmatch('[0-9a-f]{32}',rid):(DATA/'recordings'/rid).unlink(missing_ok=True)
+            return self.send({'ok':True})
+        if path == '/api/speech/learn':
+            rid=text(b,'id',32)
+            if b.get('own_voice') is not True: raise ValueError('Nur ausdrücklich bestätigte eigene Stimme als Lernbeispiel verwenden')
+            corrected=text(b,'corrected',10000);words=text(b,'words',1000,False)
+            with connect() as c:
+                sample=c.execute('SELECT duration FROM speech_samples WHERE recording_id=?',(rid,)).fetchone()
+                if not sample:raise ValueError('Lernaufnahme fehlt')
+                if not 1<=sample[0]<=30:raise ValueError('Für das Lernen bitte eine eigene Aufnahme von 1 bis 30 Sekunden verwenden')
+                c.execute('UPDATE speech_samples SET corrected=?,own_voice=1,words=? WHERE recording_id=?',(corrected,words,rid))
+            return self.send({'ok':True,'note':'Korrektur und Wörter gespeichert. Modellgewichte wurden noch nicht trainiert.'})
         if path == '/api/voice/review':
             if not isinstance(b.get('accept'),bool): raise ValueError('Bestätigung fehlt')
             return self.send(review_voice(int(b['id']),b['accept'],b))
@@ -689,7 +716,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/recordings':
             session_id=text(b,'session_id',64,False)
             mode=text(b,'mode',20,False) or 'protocol'
-            if mode not in ('protocol','assistant','silent'): raise ValueError('Ungültiger Sprachmodus')
+            if mode not in ('protocol','assistant','silent','training'): raise ValueError('Ungültiger Sprachmodus')
+            if mode=='training' and b.get('own_voice') is not True: raise ValueError('Lernmodus nur für deine eigene Stimme bestätigen')
             captured=text(b,'captured_at',80,False)
             if captured:
                 stamp=datetime.fromisoformat(captured.replace('Z','+00:00'))

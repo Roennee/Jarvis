@@ -73,3 +73,6 @@ Auf dem Laptop einmal `bash setup-android-signing.sh` ausführen. Voraussetzunge
 GitHub Actions signiert künftig mit diesem Schlüssel und prüft die APK-Signatur. Fehlen die Secrets, laufen Tests/Compilation, aber es wird absichtlich keine installierbare APK veröffentlicht. Lokale Entwickler-Builds ohne die Umgebungsvariablen bleiben kurzlebige Debug-Builds und dürfen nicht als Update verteilt werden.
 
 Für den Übergang von einer alten, anders signierten Installation kann eine einmalige Neuinstallation erforderlich sein. Vorher gespeicherte/ausstehende Aufnahmen an den Laptop senden und erfolgreiche Verarbeitung kontrollieren. Chats und Notizen auf dem Laptop sind getrennt vom App-Speicher, aber ungesendetes Audio und heruntergeladene Wakeword-Dateien auf dem Pixel gehen beim Deinstallieren verloren. Alten Schlüssel aus einer öffentlichen APK kann man nicht rekonstruieren.
+
+
+Server v0.8 ändert die Ablageregel in beiden Modi auf Vorschläge mit Bestätigung. Das vorhandene Android-Paket kann dieselbe aktualisierte Oberfläche laden; für diese Änderung ist kein neues APK nötig. Schweizerdeutsches Sprachprofil und der lokale Lernbereich werden auf dem Laptop eingerichtet. Akustisches Training ist ein expliziter GPU-Schritt, keine automatische Eigenschaft des Mitschreibens.

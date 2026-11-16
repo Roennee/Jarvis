@@ -89,12 +89,14 @@ class WorkspaceTests(unittest.TestCase):
         with patch.object(self.app,'decide_voice',return_value={'action':'calendar','title':'Training','start':'2026-11-16T14:00:00+01:00','end':'2026-11-16T14:30:00+01:00','default_duration':True,'reply':'ignored'}):
             first=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')
             second=self.app.apply_voice_action(rid,'Trage morgen um 14 Uhr Training ein','silent')
-        self.assertEqual(first['event_id'],second['event_id']);self.assertEqual(first['reply'],'')
+        self.assertEqual(first['proposal_id'],second['proposal_id']);self.assertEqual(first['reply'],'')
+        self.assertEqual(first['state'],'pending')
+        first=self.data('/api/voice/review',{'id':first['proposal_id'],'accept':True})
         self.assertEqual(self.data('/api/voice/result?id='+rid)['result']['event_id'],first['event_id'])
         self.assertEqual(len([e for e in self.data('/api/events') if e['id']==first['event_id']]),1)
         self.assertEqual(self.req('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'untrusted'})[0],400)
 
-    def test_conversation_requires_review_and_silent_creates_tasks(self):
+    def test_both_modes_require_review(self):
         from unittest.mock import patch
         task={'body':'Mischa anrufen','owner':'','due':'morgen','evidence':'Mischa anrufen'}
         decision={'action':'note','title':'Sorter','summary':'Mischa kontaktieren','category':'Arbeit','tasks':[task],'reply':''}
@@ -122,7 +124,7 @@ class WorkspaceTests(unittest.TestCase):
         silent_rid=recording('silent','silent-test')
         with patch.object(self.app,'decide_voice',return_value={**decision,'tasks':[dict(task,body='Layout prüfen')]}):
             silent=self.app.apply_voice_action(silent_rid,'Mischa anrufen','silent')
-        self.assertEqual(silent['state'],'accepted');self.assertEqual(silent['reply'],'');self.assertEqual(len(silent['task_ids']),1)
+        self.assertEqual(silent['state'],'pending');self.assertEqual(silent['reply'],'');self.assertNotIn('task_ids',silent)
 
     def test_rejection_and_session_isolation(self):
         from unittest.mock import patch
@@ -139,10 +141,23 @@ class WorkspaceTests(unittest.TestCase):
         again=self.data('/api/voice/review',{'id':proposed['proposal_id'],'accept':True})
         self.assertEqual(again['state'],'dismissed');self.assertEqual(len(self.data('/api/tasks')),count)
 
+    def test_personal_speech_corrections_require_own_voice(self):
+        rid=self.data('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'training','own_voice':True})['id']
+        with self.app.connect() as c:c.execute('INSERT INTO speech_samples(recording_id,original,duration) VALUES(?,?,?)',(rid,'Blumer anrufen',5))
+        payload={'id':rid,'corrected':'Beumer anrufen','words':'Beumer, Mischa','own_voice':False}
+        self.assertEqual(self.req('/api/speech/learn',payload)[0],400)
+        self.data('/api/speech/learn',{**payload,'own_voice':True})
+        sample=next(s for s in self.data('/api/speech/samples') if s['recording_id']==rid)
+        self.assertEqual(sample['corrected'],'Beumer anrufen');self.assertEqual(sample['own_voice'],1)
+        self.assertEqual(self.req('/api/recordings',{'mime':'audio/wav','audio':'eA==','mode':'training'})[0],400)
+        self.assertEqual(self.req('/api/speech/profile',{'profile':'../../outside'})[0],400)
+        self.data('/api/speech/delete',{'id':rid})
+        self.assertFalse(any(s['recording_id']==rid for s in self.data('/api/speech/samples')))
+
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],9)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],10)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -218,7 +233,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.7.1')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.8.0')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT
@@ -283,4 +298,5 @@ class VoiceWorkerTests(unittest.TestCase):
                 self.assertEqual(app.JOBS.unfinished_tasks,0)
             row=app.rows('SELECT * FROM recordings WHERE id=?',(rid,))[0]
             self.assertEqual(row['status'],'done');self.assertIn('reasoning_s',json.loads(row['timings']));self.assertEqual(row['transcript'],'');self.assertFalse((directory/rid).exists())
-            self.assertEqual(len(app.rows('SELECT * FROM tasks')),1)
+            self.assertEqual(len(app.rows('SELECT * FROM tasks')),0)
+            self.assertEqual(len(app.rows("SELECT * FROM voice_proposals WHERE state='pending'")),1)
