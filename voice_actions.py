@@ -44,11 +44,11 @@ def decide(transcript, mode, generate, model, reference=None, history=None):
         'calendar (eindeutiger Wunsch einen neuen Termin einzutragen), task (konkrete Aufgabe), answer (Frage/Gespräch), none (Rauschen, unverständlicher Text). '
         'Erfinde keine Angaben und behaupte keine ausgeführten Aktionen. Keine Löschungen oder externen Aktionen. '
         'Antworte als JSON: action, evidence (wörtliches Zitat), title, summary, category (Arbeit, Studium, Training, Investieren, Privat, Allgemein), reply, tasks (Liste mit body, owner, due und evidence als wörtlichem Zitat). Aufgaben sind am wichtigsten: erkenne konkrete Zusagen und To-dos auch neben einer Notiz. Keine Smalltalk-Notizen; nur relevante dauerhafte Informationen, Entscheidungen oder explizite Merkwünsche. '
-        'reply ist nur eine kurze deutsche Antwort auf eine Frage. Kalenderfragen zum Bestand kannst du nicht beantworten. '
+        'Für answer nur action und reply ausgeben, keine leeren Metadaten. Für andere Aktionen nur relevante Felder. reply: maximal zwei kurze gesprochene Sätze. Höchstens fünf konkrete Aufgaben. Kalenderfragen zum Bestand kannst du nicht beantworten. '
         'Im Gespräch natürlich antworten und bei Unklarheiten nachfragen. Speicherung wird separat bestätigt. Im stillen Modus niemals antworten oder nachfragen; nur relevante Notizen und konkrete Aufgaben/Termine erfassen.')
     result=generate('/api/chat',dict(model=model,think=False,stream=False,keep_alive=0,format='json',
         messages=[{'role':'system','content':prompt},{'role':'user','content':json.dumps({'mode':mode,'transcript':transcript,'recent_dialogue':history or []},ensure_ascii=False)}],
-        options={'num_ctx':4096,'num_predict':1000,'temperature':0}),timeout=240)
+        options={'num_ctx':4096,'num_predict':700,'temperature':0}),timeout=240)
     if result.get('done_reason')=='length': raise ValueError('Sprachentscheidung unvollständig')
     raw=json.loads(result.get('message',{}).get('content',''))
     if not isinstance(raw,dict): raise ValueError('Ungültige Sprachentscheidung')
@@ -67,7 +67,7 @@ def decide(transcript, mode, generate, model, reference=None, history=None):
     if action=='task' and not tasks:
         tasks=[{'body':clean['title'] or clean['summary'] or clean['evidence'],'owner':'','due':'','evidence':clean['evidence']}]
     if mode=='silent' and action=='answer': action='none'
-    decision={'action':action,'category':category,'tasks':tasks[:15],**clean,'reply':clean['reply'] if mode=='assistant' and action=='answer' else ''}
+    decision={'action':action,'category':category,'tasks':tasks[:5],**clean,'reply':clean['reply'] if mode=='assistant' and action=='answer' else ''}
     if action=='calendar':
         # Questions about dates must never silently create new appointments.
         if re.search(r'(?i)^(?:was|wann|welche|habe ich|ist|gibt es)\b',clean['evidence'].strip()):

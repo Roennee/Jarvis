@@ -46,7 +46,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.7.0'
+VERSION = '0.7.1'
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -61,7 +61,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 8:
+        if old_version < 9:
             backup()
     with connect() as c:
         c.executescript('''
@@ -106,7 +106,9 @@ def init():
         if 'session_id' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
             c.execute("ALTER TABLE recordings ADD COLUMN session_id TEXT DEFAULT ''")
         c.execute("CREATE TABLE IF NOT EXISTS voice_proposals(id INTEGER PRIMARY KEY,recording_id TEXT UNIQUE,session_id TEXT,payload TEXT,state TEXT DEFAULT 'pending',created TEXT DEFAULT CURRENT_TIMESTAMP)")
-        c.execute('PRAGMA user_version=8')
+        if 'timings' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute("ALTER TABLE recordings ADD COLUMN timings TEXT DEFAULT '{}'")
+        c.execute('PRAGMA user_version=9')
 
 
 def rows(sql, args=()):
@@ -390,6 +392,7 @@ def apply_voice_action(rid, transcript, mode):
 def recording_worker():
     while True:
         rid = JOBS.get()
+        job_start=time.monotonic()
         try:
             with MODEL_LOCK:
                 with connect() as c:
@@ -401,9 +404,11 @@ def recording_worker():
                     pass
                 cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(ROOT/'models'/'whisper-base')]
                 env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_GLOSSARY': settings()['glossary']}
+                stt_start=time.monotonic()
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
                 if result.returncode:
                     raise RuntimeError('Lokale Transkription fehlgeschlagen. Aufnahme bleibt erhalten. Installation und Sprachmodell prüfen.')
+                stt_done=time.monotonic()
                 transcript = json.loads(result.stdout.strip().splitlines()[-1])['text']
                 with connect() as c:
                     c.execute("UPDATE recordings SET status='analyzing',transcript=?,error='' WHERE id=?", (transcript, rid))
@@ -417,7 +422,8 @@ def recording_worker():
                     else:
                         save_protocol(transcript, summarize_transcript(transcript), rid)
                     with connect() as c:
-                        c.execute("UPDATE recordings SET status='done' WHERE id=?",(rid,))
+                        timings={'preparation_s':round(stt_start-job_start,2),'speech_s':round(stt_done-stt_start,2),'reasoning_s':round(time.monotonic()-stt_done,2),'total_s':round(time.monotonic()-job_start,2)}
+                        c.execute("UPDATE recordings SET status='done',timings=? WHERE id=?",(json.dumps(timings),rid))
                 except Exception:
                     with connect() as c:
                         c.execute("UPDATE recordings SET status='done',error='Transkript fertig; KI-Protokoll noch nicht erstellt. Analyse manuell erneut versuchen.' WHERE id=?",(rid,))
@@ -497,15 +503,16 @@ class Handler(BaseHTTPRequestHandler):
                 for item in items: item['payload']=json.loads(item['payload'])
                 return self.send(items)
             if path == '/api/voice/actions':
-                entries=rows('SELECT v.recording_id,v.result,v.created,r.transcript,r.mode FROM voice_actions v JOIN recordings r ON r.id=v.recording_id ORDER BY v.created DESC,v.rowid DESC LIMIT 100')
-                for item in entries: item['result']=json.loads(item['result'])
+                entries=rows('SELECT v.recording_id,v.result,v.created,r.transcript,r.mode,r.timings FROM voice_actions v JOIN recordings r ON r.id=v.recording_id ORDER BY v.created DESC,v.rowid DESC LIMIT 100')
+                for item in entries:
+                    item['result']=json.loads(item['result']);item['timings']=json.loads(item['timings'] or '{}')
                 return self.send(entries)
             if path == '/api/voice/result':
                 rid=q.get('id',[''])[0]
-                records=rows('SELECT status,error FROM recordings WHERE id=?',(rid,))
+                records=rows('SELECT status,error,timings FROM recordings WHERE id=?',(rid,))
                 if not records: return self.send({'error':'Aufnahme fehlt'},code=404)
                 actions=rows('SELECT result FROM voice_actions WHERE recording_id=?',(rid,))
-                return self.send({**records[0],'result':json.loads(actions[0]['result']) if actions else None})
+                return self.send({**records[0],'timings':json.loads(records[0]['timings'] or '{}'),'result':json.loads(actions[0]['result']) if actions else None})
             if path == '/api/recordings':
                 return self.send(rows("SELECT * FROM recordings WHERE mode='protocol' OR transcript!='' AND status='done' ORDER BY created DESC,rowid DESC LIMIT 100"))
             if path == '/api/bees/local':

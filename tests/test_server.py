@@ -142,7 +142,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],8)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],9)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -218,7 +218,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.7.0')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.7.1')
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT
@@ -282,5 +282,5 @@ class VoiceWorkerTests(unittest.TestCase):
                 while app.JOBS.unfinished_tasks and time.monotonic()<deadline:time.sleep(.01)
                 self.assertEqual(app.JOBS.unfinished_tasks,0)
             row=app.rows('SELECT * FROM recordings WHERE id=?',(rid,))[0]
-            self.assertEqual(row['status'],'done');self.assertEqual(row['transcript'],'');self.assertFalse((directory/rid).exists())
+            self.assertEqual(row['status'],'done');self.assertIn('reasoning_s',json.loads(row['timings']));self.assertEqual(row['transcript'],'');self.assertFalse((directory/rid).exists())
             self.assertEqual(len(app.rows('SELECT * FROM tasks')),1)

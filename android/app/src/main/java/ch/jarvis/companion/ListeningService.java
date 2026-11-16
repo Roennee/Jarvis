@@ -23,6 +23,10 @@ public class ListeningService extends Service {
     private volatile boolean directCaptureRequested=false;
     private android.speech.tts.TextToSpeech cueVoice;
     private volatile boolean cueReady=false;
+    private final Handler feedbackHandler=new Handler(Looper.getMainLooper());
+    private final TurnFeedback feedback=new TurnFeedback();
+    private final java.util.Set<String> failedUtterances=ConcurrentHashMap.newKeySet();
+    private final ConcurrentHashMap<String,CountDownLatch> utterances=new ConcurrentHashMap<>();
     private volatile AudioRecord microphone;
     private volatile MediaPlayer player;
     private PowerManager.WakeLock wake;
@@ -52,6 +56,12 @@ public class ListeningService extends Service {
             running=true;active=true;
             cueVoice=new android.speech.tts.TextToSpeech(this,result->{
                 if(result==android.speech.tts.TextToSpeech.SUCCESS&&cueVoice!=null){
+                    cueVoice.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener(){
+                        public void onStart(String id){}
+                        public void onDone(String id){CountDownLatch wait=utterances.remove(id);if(wait!=null)wait.countDown();}
+                        public void onError(String id){CountDownLatch wait=utterances.remove(id);if(wait!=null){failedUtterances.add(id);wait.countDown();}}
+                        public void onStop(String id,boolean interrupted){CountDownLatch wait=utterances.remove(id);if(wait!=null)wait.countDown();}
+                    });
                     java.util.Set<android.speech.tts.Voice> voices=cueVoice.getVoices();
                     if(voices!=null)for(android.speech.tts.Voice v:voices)if("de".equals(v.getLocale().getLanguage())&&!v.isNetworkConnectionRequired()){cueVoice.setVoice(v);cueReady=true;break;}
                 }
@@ -100,7 +110,7 @@ public class ListeningService extends Service {
                 if(capturing){
                     utterance.write(buffer,0,n);if(speech){voiced+=ms;silence=0;}else silence+=ms;
                     long elapsed=SystemClock.elapsedRealtime()-triggered;
-                    if((voiced>=400&&silence>=1800)||elapsed>=45000||(voiced==0&&elapsed>=30000)){
+                    if((voiced>=400&&silence>=("assistant".equals(mode)?1000:1800))||elapsed>=45000||(voiced==0&&elapsed>=30000)){
                         if(voiced>=400)enqueue(utterance.toByteArray());
                         capturing=false;if(voiced==0)followUntil=0;utterance.reset();voiced=0;silence=0;if(recognizer!=null)recognizer.reset();
                     }
@@ -126,6 +136,15 @@ public class ListeningService extends Service {
         VoiceClient.writeText(new File(file.getPath()+".mode").toPath(),mode);
         VoiceClient.writeText(new File(file.getPath()+".session").toPath(),getSharedPreferences("voice",0).getString("session_id",""));
         if("assistant".equals(mode))waiting=true;
+        final long turn=feedback.begin("assistant".equals(mode));
+        final long started=SystemClock.elapsedRealtime();
+        if("assistant".equals(mode)){
+            status="Ich habe dich gehört · Verarbeitung läuft";
+            feedbackHandler.postDelayed(()->{
+                if(running&&waiting&&feedback.claimPrompt(turn,SystemClock.elapsedRealtime()-started)&&cueReady)
+                    cueVoice.speak("Lass mich kurz nachdenken.",android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"wait-"+turn);
+            },2600);
+        }
         try{uploads.execute(()->process(file));}catch(RejectedExecutionException e){waiting=false;status="Warteschlange voll. Sprachdatei bleibt lokal; später erneut senden.";}
     }
     private void process(File file){
@@ -141,19 +160,29 @@ public class ListeningService extends Service {
                     JSONObject decision=result.optJSONObject("result");
                     if(decision==null)throw new IOException("Transkript bleibt auf Laptop, Aktion muss geprüft werden");
                     VoiceClient.writeText(new File(file.getPath()+".done").toPath(),"ok");
-                    status="Verarbeitet · "+decision.optString("action");
+                    feedback.finish();
+                    status="Antwort bereit · "+decision.optString("action");
                     if("assistant".equals(jobMode)&&running){String reply=decision.optString("reply");if(!reply.isEmpty())speak(base,reply);followUntil=SystemClock.elapsedRealtime()+30000;status="Ich höre weiter · 30 Sekunden";}
                     if(!decision.optBoolean("keep_transcript")){file.delete();new File(file.getPath()+".session").delete();new File(file.getPath()+".receipt").delete();new File(file.getPath()+".mode").delete();new File(file.getPath()+".done").delete();}
                     return;
                 }
                 if("error".equals(state)||"interrupted".equals(state))throw new IOException("Verarbeitung auf Laptop prüfen");
-                Thread.sleep(3000);
+                Thread.sleep(i<20?500:1000);
             }
             throw new IOException("Laptop braucht länger. Original bleibt lokal.");
         }catch(Exception e){status="Sprachdatei bleibt lokal: "+e.getMessage();}
-        finally{waiting=false;}
+        finally{feedback.finish();waiting=false;}
+    }
+    private boolean speakOnDevice(String text)throws Exception{
+        if(!cueReady||cueVoice==null)return false;
+        String id=java.util.UUID.randomUUID().toString();CountDownLatch done=new CountDownLatch(1);utterances.put(id,done);
+        if(cueVoice.speak(text,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,id)==android.speech.tts.TextToSpeech.ERROR){utterances.remove(id);return false;}
+        long deadline=SystemClock.elapsedRealtime()+90000;
+        while(running&&SystemClock.elapsedRealtime()<deadline){if(done.await(100,TimeUnit.MILLISECONDS))return !failedUtterances.remove(id);}
+        utterances.remove(id);cueVoice.stop();return true;
     }
     private void speak(String base,String reply)throws Exception{
+        if(getSharedPreferences("voice",0).getBoolean("fastVoice",true)&&speakOnDevice(reply))return;
         JSONObject status=VoiceClient.json(VoiceClient.request(base,"/api/status",null,"",30000));
         byte[] audio=VoiceClient.request(base,"/api/voice",new JSONObject().put("text",reply),status.getString("csrf"),120000);
         File file=File.createTempFile("reply-",".wav",getCacheDir());Files.write(file.toPath(),audio);
@@ -161,6 +190,6 @@ public class ListeningService extends Service {
         try{p.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());p.setDataSource(file.getAbsolutePath());p.prepare();if(running){p.start();while(running&&p.isPlaying())Thread.sleep(100);}}
         finally{p.release();player=null;file.delete();}
     }
-    private void stopSession(){running=false;active=false;if(player!=null){try{player.stop();}catch(Exception ignored){}}if(capture==null){stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}status="Zuhören ausgeschaltet";}
-    @Override public void onDestroy(){running=false;active=false;uploads.shutdown();if(cueVoice!=null){cueVoice.stop();cueVoice.shutdown();}if(wake!=null&&wake.isHeld())wake.release();super.onDestroy();}
+    private void stopSession(){feedback.finish();feedbackHandler.removeCallbacksAndMessages(null);running=false;active=false;if(player!=null){try{player.stop();}catch(Exception ignored){}}if(capture==null){stopForeground(STOP_FOREGROUND_REMOVE);stopSelf();}status="Zuhören ausgeschaltet";}
+    @Override public void onDestroy(){feedback.finish();feedbackHandler.removeCallbacksAndMessages(null);running=false;active=false;uploads.shutdown();if(cueVoice!=null){cueVoice.stop();cueVoice.shutdown();}if(wake!=null&&wake.isHeld())wake.release();super.onDestroy();}
 }
