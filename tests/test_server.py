@@ -61,6 +61,20 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('Agenda Prüfung',answer);self.assertIn('14:00',answer)
         self.assertIsNone(self.app.agenda_answer('Erstelle morgen um 14 Uhr einen Termin'))
 
+    @unittest.skipUnless(__import__('shutil').which('ffmpeg'),'ffmpeg missing')
+    def test_saved_web_audio_can_be_prepared_without_replacing_original(self):
+        import io,wave
+        buffer=io.BytesIO()
+        with wave.open(buffer,'wb') as out:
+            out.setparams((1,2,16000,0,'NONE',''));out.writeframes(b'\x01\x00'*16000)
+        original=buffer.getvalue()
+        rid=self.data('/api/recordings',{'mime':'audio/wav','audio':base64.b64encode(original).decode()})['id']
+        prepared=self.data('/api/recordings/prepare',{'id':rid})
+        self.assertEqual(prepared,self.data('/api/recordings/prepare',{'id':rid}))
+        status,data,headers=self.req(prepared['url'],headers={'Range':'bytes=0-11'})
+        self.assertEqual(status,206);self.assertEqual(data[:4],b'RIFF')
+        self.assertEqual(self.req('/api/audio/'+rid)[1],original)
+
     def test_audio_seek_http_and_head(self):
         payload=bytes(range(100))
         rid=self.data('/api/recordings',{'mime':'audio/wav','audio':base64.b64encode(payload).decode()})['id']

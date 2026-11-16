@@ -39,7 +39,9 @@ Auf dem Laptop das richtige Mikrofon auswählen. Nach der ersten Freigabe sind
 auch die Gerätenamen sichtbar. Bei starkem Rauschen USB-/Headset-Mikrofon mit dem
 internen Mikrofon vergleichen. Jarvis spielt das Mikrofon nicht live ab.
 
-Der neue FFmpeg-Filter reduziert lokal Rauschen (80-Hz-Hochpass, Tiefpass,
+Der neue FFmpeg-Filter schätzt zuerst den Hintergrundpegel aus leisen Abschnitten.
+Bei sehr geringem Pegel wird die spektrale Filterung ausgelassen. Bei Rauschen
+reduziert er lokal Störungen (80-Hz-Hochpass, Tiefpass,
 spektrale Unterdrückung). Keine automatische Lautheitsanhebung. Vor der ASR wird
 nur eine temporäre Kopie verarbeitet. In der Browser-Vorschau kann das Original
 verglichen werden. Bereits gefilterte Browseraufnahmen werden bei ASR nicht
@@ -49,6 +51,8 @@ längere Dateien werden nicht still abgeschnitten. Für die Erkennung bleibt bei
 Filterfehler das Original verwendbar.
 
 Audioantworten unterstützen HTTP-Range, 206, Suffix-Ranges, 416 und HEAD.
+Unter gespeicherten Aufnahmen bereitet „Rauschfilter & Spulen vorbereiten“ eine
+zusätzliche WAV-Kopie zum direkten Abspielen vor; das Original bleibt erhalten.
 Gefilterte WAV-Vorschauen haben eine definierte Dauer; importierte unvollständige
 WebM-Dateien können erst nach WAV-Umwandlung zuverlässig spulbar sein.
 

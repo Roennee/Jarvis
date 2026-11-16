@@ -51,6 +51,7 @@ JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
 VERSION = '0.9.0'
 CATALOG_LOCK = threading.Lock()
+AUDIO_LOCK = threading.Lock()
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -628,6 +629,10 @@ class Handler(BaseHTTPRequestHandler):
                 record = rows('SELECT * FROM recordings WHERE id=?', (rid,))
                 if not record or not re.fullmatch('[0-9a-f]{32}', rid):
                     return self.send({'error':'Aufnahme nicht gefunden'}, code=404)
+                if q.get('processed',[''])[0]=='1':
+                    prepared=DATA/'recordings'/(rid+'.clean.wav')
+                    if not prepared.exists():return self.send({'error':'Audio zuerst vorbereiten'},code=404)
+                    return self.audio_response(prepared,'audio/wav',head)
                 return self.audio_response(DATA/'recordings'/rid,record[0]['mime'],head)
             return self.send({'error':'Nicht gefunden'}, code=404)
         except (BrokenPipeError, ConnectionResetError):
@@ -664,6 +669,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def route_post(self, b):
         path = self.path
+        if path == '/api/recordings/prepare':
+            rid=text(b,'id',32)
+            if not re.fullmatch('[0-9a-f]{32}',rid) or not rows("SELECT id FROM recordings WHERE id=? AND mode IN ('protocol','training')",(rid,)):raise ValueError('Aufnahme fehlt')
+            if not AUDIO_LOCK.acquire(blocking=False):return self.send({'error':'Audiofilter arbeitet bereits. Kurz warten.'},code=409)
+            try:
+                target=DATA/'recordings'/(rid+'.clean.wav')
+                if not target.exists():clean_audio(DATA/'recordings'/rid,target)
+                return self.send({'url':'/api/audio/'+rid+'?processed=1'})
+            finally:AUDIO_LOCK.release()
         if path == '/api/models/test':
             if not MODEL_LOCK.acquire(blocking=False):return self.send({'error':'KI gerade beschäftigt'},code=409)
             try:
@@ -785,7 +799,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not c.execute('SELECT recording_id FROM speech_samples WHERE recording_id=?',(rid,)).fetchone(): raise ValueError('Lernbeispiel fehlt')
                 c.execute('DELETE FROM speech_samples WHERE recording_id=?',(rid,))
                 c.execute("DELETE FROM recordings WHERE id=? AND mode='training'",(rid,))
-            if re.fullmatch('[0-9a-f]{32}',rid):(DATA/'recordings'/rid).unlink(missing_ok=True)
+            if re.fullmatch('[0-9a-f]{32}',rid):
+                (DATA/'recordings'/rid).unlink(missing_ok=True)
+                (DATA/'recordings'/(rid+'.clean.wav')).unlink(missing_ok=True)
             return self.send({'ok':True})
         if path == '/api/speech/learn':
             rid=text(b,'id',32)

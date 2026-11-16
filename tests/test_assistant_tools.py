@@ -20,6 +20,17 @@ class AudioTests(unittest.TestCase):
             with self.assertRaises(ValueError):byte_range(header,100)
 
     @unittest.skipUnless(shutil.which('ffmpeg'),'ffmpeg not installed')
+    def test_clean_speech_with_quiet_gaps_is_not_spectrally_altered(self):
+        rate=16000
+        frames=[0]*rate+[int(6000*math.sin(2*math.pi*440*i/rate)) for i in range(rate)]+[0]*rate
+        raw=struct.pack('<'+'h'*len(frames),*frames)
+        with tempfile.TemporaryDirectory() as folder:
+            source=Path(folder)/'source.wav';target=Path(folder)/'clean.wav'
+            with wave.open(str(source),'wb') as w:w.setparams((1,2,rate,0,'NONE',''));w.writeframes(raw)
+            clean_audio(source,target)
+            with wave.open(str(target),'rb') as w:self.assertEqual(w.readframes(w.getnframes()),raw)
+
+    @unittest.skipUnless(shutil.which('ffmpeg'),'ffmpeg not installed')
     def test_denoise_reduces_stationary_noise_without_trimming_timeline(self):
         rng=random.Random(1);rate=16000
         samples=[int(2200*rng.uniform(-1,1)+(5000*math.sin(2*math.pi*220*i/rate) if rate<=i<2*rate else 0)) for i in range(3*rate)]
