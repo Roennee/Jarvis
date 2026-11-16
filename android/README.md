@@ -94,3 +94,9 @@ Gerätetest: ohne Bluetooth-Headset 5 Sekunden schweigen, danach 10 Sekunden nor
 Schweizerdeutsch sprechen. Web-Aufnahme und Stillmodus getrennt prüfen, danach
 eine zweite Sitzung starten und Stoppen prüfen. Aufnahmequalität und Erkennung
 müssen auf dem echten Gerät verglichen werden; CI kann sie nicht nachweisen.
+
+## Android 0.5.0
+
+Native Aufnahme aus derselben Web-Oberfläche, explizite Kalenderauswahl und
+Sperrbildschirm-Kachel hinzufügen: [Einrichtung](../docs/assistant-setup.md).
+Gleicher Paketname und gleicher privater Signaturschlüssel; VersionCode 9.

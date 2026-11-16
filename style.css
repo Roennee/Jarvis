@@ -2,3 +2,14 @@
 
 /* Structured protocol controls */
 details{margin:12px 0;padding:10px 0;border-top:1px solid #26343d}summary{cursor:pointer;line-height:1.5}details label{display:block;margin:12px 0}details>p{white-space:pre-wrap;overflow-wrap:anywhere}.entry h3{margin:10px 0}.entry h4{margin:18px 0 8px}.entry li{margin:7px 0}
+
+/* Assistant-first navigation; the same dashboard on desktop and Pixel. */
+:root{--mint:#a4e8ce;--bg:#0c1115;--panel:#121a20}
+body{background:var(--bg)}.card{box-shadow:none;border-color:#233039;border-radius:18px}.intro{margin:28px 0 24px}h1{letter-spacing:-1.5px}.hero{background:#121d22}.orb{box-shadow:0 0 44px #8cdec21a;animation:none}.button,button{border-radius:12px}.actions{gap:10px}summary{font-weight:500}audio{width:100%;margin:12px 0}#modelReport small{display:block;margin-top:5px}#cloudForm{max-width:700px}header .header-settings{margin-left:auto;margin-right:10px}#recordStatus,#nativeVoiceStatus,#nativeRecordStatus{color:var(--mint);line-height:1.6}#nativeRecordStatus:empty{display:none}#previewTools{display:flex;gap:8px;flex-wrap:wrap}.stats .card{text-align:left}nav button.active{background:#a4e8ce16;color:var(--mint)}
+@media(max-width:900px){
+ aside{padding:18px 20px 0;border:0}.eyebrow{letter-spacing:1.5px}aside>.eyebrow{display:none}
+ nav{position:fixed;bottom:0;left:0;right:0;z-index:20;display:flex;background:#10191ff5;border-top:1px solid #27343d;padding:8px 8px max(8px,env(safe-area-inset-bottom));margin:0;justify-content:space-around;backdrop-filter:blur(16px)}
+ nav button{padding:8px 5px;min-width:0;flex:1;font-size:11px;border:0;border-radius:10px}
+ nav button[data-view-id="chat"],nav button[data-view-id="training"],nav button[data-view-id="invest"],nav button[data-view-id="settings"]{display:none}
+ main{padding:14px 18px 95px}header{gap:8px}.intro{margin:24px 0}.card{padding:20px}.hero{display:block}.hero .orb{display:none}.hero h2{font-size:25px}.stats{grid-template-columns:1fr 1fr 1fr}.stat{padding:12px 10px!important}.stat>span:last-child{font-size:11px}.actions>*{flex-grow:1;text-align:center}#record,#nativeRecord{min-height:58px;width:100%;font-size:17px}#recordTime{font-variant-numeric:tabular-nums}details.card{padding:15px 20px}.badge{max-width:145px}.header-settings{font-size:12px}.grid .card{min-width:0}#cloudForm .check{align-items:flex-start}
+}

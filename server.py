@@ -28,6 +28,8 @@ from urllib.parse import urlsplit, parse_qs
 from zoneinfo import ZoneInfo
 from voice_actions import decide as decide_voice
 from speech_profile import model_path as speech_model_path, ready as speech_ready, prompt as speech_prompt, profile_for_mode
+from audio_tools import byte_range, clean_audio
+import model_hub
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('JARVIS_DATA_DIR', str(ROOT))).resolve()
@@ -47,7 +49,8 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.8.0'
+VERSION = '0.9.0'
+CATALOG_LOCK = threading.Lock()
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
 
 
@@ -62,7 +65,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 10:
+        if old_version < 11:
             backup()
     with connect() as c:
         c.executescript('''
@@ -110,7 +113,9 @@ def init():
         if 'timings' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
             c.execute("ALTER TABLE recordings ADD COLUMN timings TEXT DEFAULT '{}'")
         c.execute("CREATE TABLE IF NOT EXISTS speech_samples(recording_id TEXT PRIMARY KEY,original TEXT DEFAULT '',corrected TEXT DEFAULT '',own_voice INTEGER DEFAULT 0,words TEXT DEFAULT '',duration REAL DEFAULT 0,created TEXT DEFAULT CURRENT_TIMESTAMP)")
-        c.execute('PRAGMA user_version=10')
+        if 'preprocessed' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
+            c.execute('ALTER TABLE recordings ADD COLUMN preprocessed INTEGER DEFAULT 0')
+        c.execute('PRAGMA user_version=11')
 
 
 def rows(sql, args=()):
@@ -119,7 +124,7 @@ def rows(sql, args=()):
 
 
 def settings():
-    result = {'model': 'qwen3:1.7b', 'glossary': '', 'context': False, 'speech_profile':'base'}
+    result = {'model': 'qwen3:1.7b', 'glossary': '', 'context': False, 'speech_profile':'base', 'ai_mode':'local', 'cloud_model':'openrouter/free', 'cloud_voice':False, 'weekly_models':True, 'denoise':True}
     for r in rows('SELECT key,value FROM settings'):
         result[r['key']] = json.loads(r['value'])
     return result
@@ -162,6 +167,43 @@ def ollama(path, payload=None, timeout=8):
         return json.load(r)
 
 
+def cloud_key():
+    path=DATA/'private'/'cloud-key.json'
+    return json.loads(path.read_text()).get('key','') if path.exists() else ''
+
+
+def generate(path,payload=None,timeout=240,voice=False):
+    cfg=settings()
+    if cfg['ai_mode']=='cloud' and (not voice or cfg['cloud_voice']):
+        key=cloud_key()
+        if not key:raise ValueError('Gratis-Cloud benötigt deinen OpenRouter-API-Schlüssel unter Einstellungen.')
+        return model_hub.cloud_generate(payload,key,cfg['cloud_model'])
+    return ollama(path,payload,timeout)
+
+
+def model_report():
+    path=DATA/'private'/'model-catalog.json'
+    return json.loads(path.read_text()) if path.exists() else {}
+
+
+def check_models():
+    if not CATALOG_LOCK.acquire(blocking=False):return {'note':'Modellprüfung läuft bereits.'}
+    try:
+        report=model_hub.scan(model_report())
+        model_hub.atomic_json(DATA/'private'/'model-catalog.json',report)
+        return report
+    finally:CATALOG_LOCK.release()
+
+
+def periodic_models():
+    while True:
+        try:
+            last=model_report().get('checked_at')
+            if settings()['weekly_models'] and (not last or (datetime.now(timezone.utc)-datetime.fromisoformat(last)).total_seconds()>=7*86400):check_models()
+        except Exception:pass
+        time.sleep(3600)
+
+
 def piper_ready():
     path=ROOT/'models'/'piper'/'de_DE-thorsten-medium.onnx'
     return importlib.util.find_spec('piper') is not None and path.is_file() and Path(str(path)+'.json').is_file()
@@ -178,7 +220,7 @@ def status():
         online = True
     except (OSError, ValueError):
         online, models = False, []
-    return dict(version=VERSION, online=online, models=models, settings=settings(),
+    return dict(version=VERSION, online=online, models=models, settings=settings(), cloud_ready=bool(cloud_key()), denoise_ready=bool(shutil.which('ffmpeg')),
         speech_profiles={name:speech_ready(ROOT,name) for name in ('base','swiss','personal')}, voice=piper_ready() or bool(shutil.which('espeak-ng')), voice_engine='piper' if piper_ready() else 'espeak' if shutil.which('espeak-ng') else 'missing', transcription=stt_ready(),
         calendar_import=importlib.util.find_spec('icalendar') is not None and importlib.util.find_spec('recurring_ical_events') is not None,
         remote=REMOTE, timezone='Europe/Zurich', csrf=CSRF, calendars={'google': (DATA/'private'/'google-token.json').exists(), 'microsoft': (DATA/'private'/'microsoft-cache.json').exists()})
@@ -312,6 +354,26 @@ def save_protocol(transcript, analysis, rid=None):
 VOICE_DIALOGUE={}
 
 
+def agenda_answer(content):
+    normalized=content.lower()
+    if not re.search(r'\b(?:termine|agenda|kalender)\b',normalized) and not re.search(r'was (?:steht|habe ich).*(?:heute|morgen).*an',normalized):return None
+    if not re.search(r'\b(?:was|welche|wann|habe ich|zeig|zeige|lies)\b',normalized):return None
+    offset=2 if 'übermorgen' in normalized else 1 if 'morgen' in normalized else 0
+    date=datetime.now(ZURICH).date()+timedelta(days=offset)
+    begin=datetime.combine(date,datetime.min.time(),ZURICH).astimezone(timezone.utc)
+    end=datetime.combine(date+timedelta(days=1),datetime.min.time(),ZURICH).astimezone(timezone.utc)
+    selected=[]
+    for event in rows('SELECT title,start,end FROM events ORDER BY start LIMIT 3000'):
+        if datetime.fromisoformat(event['start'])<end and datetime.fromisoformat(event['end'])>begin:selected.append(event)
+    label=['Heute','Morgen','Übermorgen'][offset]
+    if not selected:return label+' sehe ich keine Termine in den mit Jarvis verbundenen Kalendern. Kalender bei Bedarf aktualisieren.'
+    lines=[]
+    for event in selected[:5]:
+        stamp=datetime.fromisoformat(event['start']).astimezone(ZURICH)
+        lines.append(stamp.strftime('%H:%M')+' '+event['title'][:120])
+    return label+': '+', '.join(lines)+('. Weitere Termine stehen in deiner Agenda.' if len(selected)>5 else '.')
+
+
 def commit_voice(c, decision, rid):
     result=dict(decision)
     if decision['action']=='note':
@@ -366,7 +428,8 @@ def apply_voice_action(rid, transcript, mode):
         decision={'action':'answer','reply':result['reply'],'tasks':[]}
     else:
         history=VOICE_DIALOGUE.get(session,[]) if session else []
-        decision=decide_voice(transcript,mode,ollama,settings()['model'],reference=reference,history=history)
+        agenda=agenda_answer(transcript) if mode=='assistant' else None
+        decision={'action':'answer','reply':agenda,'tasks':[]} if agenda else decide_voice(transcript,mode,lambda path,payload,timeout=240:generate(path,payload,timeout,voice=True),settings()['model'],reference=reference,history=history)
         if session:
             if len(VOICE_DIALOGUE)>50: VOICE_DIALOGUE.pop(next(iter(VOICE_DIALOGUE)))
             VOICE_DIALOGUE[session]=(history+[{'user':transcript[:1500],'assistant':decision.get('reply','')[:1500]}])[-4:]
@@ -405,7 +468,7 @@ def recording_worker():
                 profile=profile_for_mode(settings()['speech_profile'],speech_mode)
                 cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(speech_model_path(ROOT,profile))]
                 learned=[word.strip() for item in rows("SELECT words FROM speech_samples WHERE own_voice=1 AND corrected!='' ORDER BY created DESC LIMIT 50") for word in item['words'].split(',')]
-                env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_GLOSSARY':speech_prompt(settings()['glossary'],learned)}
+                env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_DENOISE':'1' if settings()['denoise'] and not rows('SELECT preprocessed FROM recordings WHERE id=?',(rid,))[0]['preprocessed'] else '0', 'JARVIS_GLOSSARY':speech_prompt(settings()['glossary'],learned)}
                 stt_start=time.monotonic()
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=900, env=env)
                 if result.returncode:
@@ -441,6 +504,29 @@ def recording_worker():
 class Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
 
+    def audio_response(self,path,mime,head=False):
+        size=path.stat().st_size
+        try:span=byte_range(self.headers.get('Range'),size)
+        except ValueError:
+            self.send_response(416);self.send_header('Content-Range',f'bytes */{size}');self.send_header('Content-Length','0');self.end_headers();return
+        start,end=span if span else (0,size-1)
+        self.send_response(206 if span else 200)
+        self.send_header('Content-Type',mime);self.send_header('Accept-Ranges','bytes')
+        self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Content-Length',str(end-start+1))
+        if span:self.send_header('Content-Range',f'bytes {start}-{end}/{size}')
+        self.end_headers()
+        if not head:
+            with path.open('rb') as stream:
+                stream.seek(start);remaining=end-start+1
+                while remaining:
+                    chunk=stream.read(min(65536,remaining))
+                    if not chunk:break
+                    self.wfile.write(chunk);remaining-=len(chunk)
+
+    def do_HEAD(self):
+        self.do_GET(head=True)
+
     def send(self, data, mime='application/json; charset=utf-8', code=200, attachment=None):
         if not isinstance(data, bytes):
             data = json.dumps(data, ensure_ascii=False).encode()
@@ -454,7 +540,7 @@ class Handler(BaseHTTPRequestHandler):
         if attachment:
             self.send_header('Content-Disposition', f'attachment; filename="{attachment}"')
         self.end_headers()
-        self.wfile.write(data)
+        if self.command!='HEAD':self.wfile.write(data)
 
     def guard(self):
         if self.headers.get('Host') not in HOSTS:
@@ -462,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return True
 
-    def do_GET(self):
+    def do_GET(self,head=False):
         if not self.guard():
             return
         try:
@@ -474,6 +560,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send((ROOT/filename).read_bytes(), mime)
             if path == '/api/status':
                 return self.send(status())
+            if path == '/api/models/catalog':
+                return self.send({**model_report(),'tests':[json.loads(r['body']) for r in rows("SELECT body FROM imports WHERE kind='model-test' ORDER BY id DESC LIMIT 8")]})
+            if path == '/api/calendar/export':
+                event=rows('SELECT * FROM events WHERE id=?',(q.get('id',[''])[0],))
+                if not event:return self.send({'error':'Termin fehlt'},code=404)
+                from calendar_export import event_ics
+                return self.send(event_ics(event[0]),'text/calendar; charset=utf-8',attachment='jarvis-termin.ics')
             if path == '/api/notes/overview':
                 archived=1 if q.get('archived',['0'])[0]=='1' else 0
                 term=q.get('q',[''])[0][:200]
@@ -535,7 +628,7 @@ class Handler(BaseHTTPRequestHandler):
                 record = rows('SELECT * FROM recordings WHERE id=?', (rid,))
                 if not record or not re.fullmatch('[0-9a-f]{32}', rid):
                     return self.send({'error':'Aufnahme nicht gefunden'}, code=404)
-                return self.send((DATA/'recordings'/rid).read_bytes(), record[0]['mime'])
+                return self.audio_response(DATA/'recordings'/rid,record[0]['mime'],head)
             return self.send({'error':'Nicht gefunden'}, code=404)
         except (BrokenPipeError, ConnectionResetError):
             pass
@@ -550,7 +643,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get('Content-Type','').split(';')[0] != 'application/json':
             return self.send({'error':'JSON erforderlich'}, code=415)
         try:
-            limit = 29_000_000 if self.path == '/api/recordings' else 2_000_000
+            limit = 29_000_000 if self.path in ('/api/recordings','/api/audio/preview') else 2_000_000
             size = int(self.headers.get('Content-Length','0'))
             if not 0 < size <= limit:
                 return self.send({'error':'Anfrage ist leer oder zu gross'}, code=413)
@@ -571,6 +664,58 @@ class Handler(BaseHTTPRequestHandler):
 
     def route_post(self, b):
         path = self.path
+        if path == '/api/models/test':
+            if not MODEL_LOCK.acquire(blocking=False):return self.send({'error':'KI gerade beschäftigt'},code=409)
+            try:
+                cfg=settings();started=time.monotonic()
+                payload={'model':cfg['model'],'think':False,'stream':False,'keep_alive':0,'format':'json','messages':[
+                    {'role':'system','content':'Extrahiere nur explizite Aufgaben. Antworte als JSON mit tasks als Liste von Texten. Keine Erklärungen.'},
+                    {'role':'user','content':'Ich muss Milch kaufen und Mischa anrufen. Das Wetter ist schön.'}], 'options':{'num_ctx':2048,'num_predict':180,'temperature':0}}
+                response=generate('/api/chat',payload,timeout=240)
+                answer=response.get('message',{}).get('content','')
+                try:
+                    tasks=json.loads(answer)['tasks'];joined=' '.join(tasks).lower()
+                    passed=isinstance(tasks,list) and len(tasks)==2 and all(word in joined for word in ('milch','mischa')) and 'wetter' not in joined
+                except (ValueError,KeyError,TypeError):passed=False
+                result={'checked_at':now(),'mode':cfg['ai_mode'],'model':response.get('model') or (cfg['cloud_model'] if cfg['ai_mode']=='cloud' else cfg['model']),'seconds':round(time.monotonic()-started,2),'passed':passed,'answer':answer[:2000],'note':'Ein synthetischer Kurztest, kein allgemeiner Qualitätsnachweis.'}
+                with connect() as c:c.execute('INSERT INTO imports(kind,body) VALUES(?,?)',('model-test',json.dumps(result,ensure_ascii=False)))
+                return self.send(result)
+            finally:MODEL_LOCK.release()
+        if path == '/api/audio/preview':
+            raw=base64.b64decode(text(b,'audio',28_500_000),validate=True)
+            if not 0<len(raw)<=20_000_000:raise ValueError('Audio maximal 20 MB')
+            with tempfile.TemporaryDirectory(prefix='jarvis-filter-') as folder:
+                source=Path(folder)/'input';target=Path(folder)/'clean.wav';source.write_bytes(raw)
+                clean_audio(source,target)
+                return self.send(target.read_bytes(),'audio/wav')
+        if path == '/api/cloud/settings':
+            mode=text(b,'ai_mode',10)
+            if mode not in ('local','cloud'):raise ValueError('Ungültiger KI-Modus')
+            model=text(b,'cloud_model',150)
+            if mode=='cloud' and model!='openrouter/free' and model not in {m['id'] for m in model_hub.cloud_catalog()}:raise ValueError('Nur aktuell kostenlose Cloudmodelle wählbar')
+            for field in ('cloud_voice','weekly_models','denoise'):
+                if not isinstance(b.get(field),bool):raise ValueError('Ungültige Einstellung')
+            key=text(b,'key',300,False)
+            if key:
+                if not re.fullmatch(r'[A-Za-z0-9_.-]{12,300}',key):raise ValueError('API-Schlüssel ungültig')
+                model_hub.atomic_json(DATA/'private'/'cloud-key.json',{'key':key})
+            if b.get('remove_key') is True:(DATA/'private'/'cloud-key.json').unlink(missing_ok=True)
+            if mode=='cloud' and not cloud_key():raise ValueError('Zuerst einen OpenRouter-API-Schlüssel eingeben')
+            for field,value in [('ai_mode',mode),('cloud_model',model),('cloud_voice',b['cloud_voice']),('weekly_models',b['weekly_models']),('denoise',b['denoise'])]:write_setting(field,value)
+            return self.send({'ok':True})
+        if path == '/api/calendar/device':
+            entries=b.get('events')
+            if not isinstance(entries,list) or len(entries)>3000:raise ValueError('Kalenderliste ungültig oder zu gross')
+            prepared=[]
+            for e in entries:
+                identity=text(e,'id',150);begin=local_time(text(e,'start',80));end=local_time(text(e,'end',80))
+                if end<=begin:raise ValueError('Terminende ungültig')
+                prepared.append((hashlib.sha256(('Pixel:'+identity).encode()).hexdigest(),text(e,'title',500),begin,end,'Pixel Kalender',text(e,'details',1000,False)))
+            with connect() as c:
+                c.execute("DELETE FROM events WHERE source='Pixel Kalender'")
+                c.executemany('INSERT INTO events VALUES(?,?,?,?,?,?)',prepared)
+            write_setting('pixel_calendar_sync',now())
+            return self.send({'ok':True,'count':len(prepared)})
         if path == '/api/protocols':
             transcript=text(b,'text',10000)
             rid=text(b,'recording_id',32,False) or None
@@ -742,7 +887,7 @@ class Handler(BaseHTTPRequestHandler):
             directory.mkdir(exist_ok=True)
             (directory/rid).write_bytes(raw)
             with connect() as c:
-                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at,client_key,session_id) VALUES(?,?,?,?,?,?,?)',(rid,'saved',mime,mode,captured,client_key,session_id))
+                c.execute('INSERT INTO recordings(id,status,mime,mode,captured_at,client_key,session_id,preprocessed) VALUES(?,?,?,?,?,?,?,?)',(rid,'saved',mime,mode,captured,client_key,session_id,int(b.get('preprocessed') is True)))
             return self.send({'ok':True,'id':rid})
         if path == '/api/transcribe':
             rid = text(b,'id',32)
@@ -841,10 +986,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/backup':
             return self.send({'ok':True,'filename':backup()})
         if path == '/api/models/check':
-            models = ollama('/api/tags')
-            with connect() as c:
-                c.execute('INSERT INTO imports(kind,body) VALUES(?,?)',('model-check',json.dumps({'time':now(),'models':models})))
-            return self.send({'ok':True,'models':models,'note':'Installierte Modellstände erfasst. Kein Vergleich mit dem Online-Katalog, kein Download.'})
+            return self.send(check_models())
         return self.send({'error':'Nicht gefunden'},code=404)
 
     def chat(self,b):
@@ -866,7 +1008,8 @@ class Handler(BaseHTTPRequestHandler):
             with connect() as c:
                 c.execute('INSERT INTO messages(chat_id,role,content) VALUES(?,?,?)',(cid,'user',content))
             payload = dict(model=cfg['model'],think=False,stream=False,keep_alive=0,messages=[{'role':'system','content':system}]+past+[{'role':'user','content':content}],options={'num_ctx':4096,'num_predict':500,'temperature':0.3})
-            result = ollama('/api/chat',payload,timeout=240)
+            agenda=agenda_answer(content)
+            result = {'message':{'content':agenda}} if agenda else generate('/api/chat',payload,timeout=240)
             answer = result.get('message',{}).get('content','').strip()
             if not answer:
                 return self.send({'error':'Modell lieferte keine Antwort. Nachricht bleibt gespeichert.'},code=502)
@@ -880,6 +1023,7 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     init()
     threading.Thread(target=recording_worker,daemon=True).start()
+    threading.Thread(target=periodic_models,daemon=True).start()
     server = ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
     server.daemon_threads = True
     print(f'Jarvis {VERSION}: http://127.0.0.1:{PORT}',flush=True)

@@ -53,6 +53,50 @@ class WorkspaceTests(unittest.TestCase):
     def data(self,path,body=None):
         status,data,_=self.req(path,body);self.assertEqual(status,200,data);return json.loads(data)
 
+    def test_calendar_question_uses_connected_agenda(self):
+        from datetime import datetime,timedelta
+        date=datetime.now(self.app.ZURICH).date()+timedelta(days=1)
+        self.data('/api/events',{'title':'Agenda Prüfung','start':str(date)+'T14:00','end':str(date)+'T15:00'})
+        answer=self.app.agenda_answer('Welche Termine habe ich morgen?')
+        self.assertIn('Agenda Prüfung',answer);self.assertIn('14:00',answer)
+        self.assertIsNone(self.app.agenda_answer('Erstelle morgen um 14 Uhr einen Termin'))
+
+    def test_audio_seek_http_and_head(self):
+        payload=bytes(range(100))
+        rid=self.data('/api/recordings',{'mime':'audio/wav','audio':base64.b64encode(payload).decode()})['id']
+        status,data,headers=self.req('/api/audio/'+rid,headers={'Range':'bytes=20-39'})
+        self.assertEqual(status,206);self.assertEqual(data,payload[20:40]);self.assertEqual(headers['Content-Range'],'bytes 20-39/100')
+        status,data,headers=self.req('/api/audio/'+rid,headers={'Range':'bytes=1000-'})
+        self.assertEqual(status,416);self.assertEqual(data,b'');self.assertEqual(headers['Content-Range'],'bytes */100')
+        request=urllib.request.Request(self.url+'/api/audio/'+rid,method='HEAD')
+        with urllib.request.urlopen(request,timeout=5) as response:
+            self.assertEqual(response.read(),b'');self.assertEqual(response.headers['Accept-Ranges'],'bytes')
+
+    def test_device_calendar_snapshot_does_not_remove_local_and_validates_before_replace(self):
+        self.data('/api/events',{'title':'Unberührt','start':'2026-12-01T14:00','end':'2026-12-01T15:00'})
+        event={'id':'device-1','title':'Pixel Test','start':'2026-12-02T14:00+01:00','end':'2026-12-02T15:00+01:00','details':''}
+        for _ in range(2):self.data('/api/calendar/device',{'events':[event]})
+        events=self.data('/api/events');self.assertEqual(sum(e['title']=='Pixel Test' for e in events),1)
+        self.assertTrue(any(e['title']=='Unberührt' for e in events))
+        self.assertEqual(self.req('/api/calendar/device',{'events':[{**event,'end':event['start']}]})[0],400)
+        self.assertTrue(any(e['title']=='Pixel Test' for e in self.data('/api/events')))
+        self.data('/api/calendar/device',{'events':[]})
+        self.assertFalse(any(e['source']=='Pixel Kalender' for e in self.data('/api/events')))
+
+    def test_cloud_secret_not_exported_and_voice_requires_separate_opt_in(self):
+        from unittest.mock import patch
+        secret='test-secret-value-123456'
+        self.data('/api/cloud/settings',{'ai_mode':'cloud','cloud_model':'openrouter/free','key':secret,'cloud_voice':False,'weekly_models':False,'denoise':True})
+        try:
+            self.assertNotIn(secret,json.dumps(self.data('/api/status')))
+            self.assertNotIn(secret,json.dumps(self.data('/api/export')))
+            with patch.object(self.app.model_hub,'cloud_generate',return_value={'message':{'content':'Cloud'}}) as cloud:
+                local=self.app.generate('/api/chat',{'messages':[]},voice=True)
+                self.assertNotEqual(local['message']['content'],'Cloud');cloud.assert_not_called()
+                self.assertEqual(self.app.generate('/api/chat',{'messages':[]})['message']['content'],'Cloud')
+        finally:self.data('/api/cloud/settings',{'ai_mode':'local','cloud_model':'openrouter/free','key':'','remove_key':True,'cloud_voice':False,'weekly_models':True,'denoise':True})
+        self.assertFalse(self.app.cloud_key())
+
     def test_protocol_review_archive_and_reanalysis(self):
         from unittest.mock import patch
         task={'body':'Mischa anrufen','owner':'Raffa','due':'morgen','evidence':'Mischa anrufen'}
@@ -157,7 +201,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],10)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],11)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:
@@ -233,7 +277,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_backup_and_export(self):
         backup=self.data('/api/backup',{})
         with sqlite3.connect(Path(self.tmp.name)/'backups'/backup['filename']) as c:self.assertGreater(c.execute('SELECT COUNT(*) FROM notes').fetchone()[0],0)
-        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],'0.8.0')
+        exported=self.data('/api/export');self.assertIn('messages',exported['data']);self.assertEqual(exported['version'],self.app.VERSION)
 
     def test_local_bees_allowlist(self):
         previous=self.app.BEES_ROOT

@@ -119,7 +119,8 @@ public class VoiceSettingsActivity extends Activity {
             try{
                 if(file.length()>20000000)throw new Exception("Aufnahme grösser als 20 MB.");
                 JSONObject s=new JSONObject(new String(request("/api/status",base,null,""),StandardCharsets.UTF_8));String token=s.getString("csrf");
-                JSONObject body=new JSONObject().put("mime","audio/mp4").put("audio",Base64.encodeToString(Files.readAllBytes(file.toPath()),Base64.NO_WRAP));
+                String mode=new File(file.getPath()+".mode").exists()?VoiceClient.readText(new File(file.getPath()+".mode").toPath()):"protocol";
+                JSONObject body=new JSONObject().put("mode",mode).put("own_voice","training".equals(mode)).put("mime","audio/mp4").put("audio",Base64.encodeToString(Files.readAllBytes(file.toPath()),Base64.NO_WRAP));
                 JSONObject result=new JSONObject(new String(request("/api/recordings",base,body,token),StandardCharsets.UTF_8));
                 new File(file.getPath()+".uploaded").createNewFile();
                 message("Aufnahme auf Laptop gespeichert.");

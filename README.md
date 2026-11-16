@@ -1,6 +1,12 @@
 # Jarvis · lokaler persönlicher Assistent
 
-Version **0.4.0**, für Linux Mint, Python 3.12, 8 GB RAM und Pixel mit Tailscale.
+Version **0.9.0**, für Linux Mint, Python 3.12, 8 GB RAM und Pixel mit Tailscale.
+
+## Assistent-Update
+
+Android **0.5.0**: native Aufnahme, Kalenderauswahl und Einrichtungsdialog für die
+Zuhörkachel. Web: lokaler Rauschfilter, spulbare Audioantworten, Gratis-Cloud und
+wöchentliche Modellprüfung. [Einrichtung und Gerätetest](docs/assistant-setup.md).
 
 ## Start
 
