@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, parse_qs
 from zoneinfo import ZoneInfo
 from voice_actions import decide as decide_voice
-from speech_profile import model_path as speech_model_path, ready as speech_ready, prompt as speech_prompt
+from speech_profile import model_path as speech_model_path, ready as speech_ready, prompt as speech_prompt, profile_for_mode
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('JARVIS_DATA_DIR', str(ROOT))).resolve()
@@ -167,8 +167,8 @@ def piper_ready():
     return importlib.util.find_spec('piper') is not None and path.is_file() and Path(str(path)+'.json').is_file()
 
 
-def stt_ready():
-    return importlib.util.find_spec('faster_whisper') is not None and speech_ready(ROOT,settings()['speech_profile'])
+def stt_ready(mode=None):
+    return importlib.util.find_spec('faster_whisper') is not None and speech_ready(ROOT,profile_for_mode(settings()['speech_profile'],mode))
 
 
 def status():
@@ -401,7 +401,9 @@ def recording_worker():
                     ollama('/api/generate', {'model': settings()['model'], 'keep_alive': 0}, timeout=30)
                 except Exception:
                     pass
-                cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(speech_model_path(ROOT,settings()['speech_profile']))]
+                speech_mode=rows('SELECT mode FROM recordings WHERE id=?',(rid,))[0]['mode']
+                profile=profile_for_mode(settings()['speech_profile'],speech_mode)
+                cmd = [sys.executable, str(ROOT/'transcribe.py'), str(DATA/'recordings'/rid), str(speech_model_path(ROOT,profile))]
                 learned=[word.strip() for item in rows("SELECT words FROM speech_samples WHERE own_voice=1 AND corrected!='' ORDER BY created DESC LIMIT 50") for word in item['words'].split(',')]
                 env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'JARVIS_GLOSSARY':speech_prompt(settings()['glossary'],learned)}
                 stt_start=time.monotonic()
@@ -746,7 +748,8 @@ class Handler(BaseHTTPRequestHandler):
             rid = text(b,'id',32)
             if not re.fullmatch('[0-9a-f]{32}',rid) or not rows('SELECT id FROM recordings WHERE id=?',(rid,)):
                 raise ValueError('Aufnahme nicht gefunden')
-            if not stt_ready():
+            speech_mode=rows('SELECT mode FROM recordings WHERE id=?',(rid,))[0]['mode']
+            if not stt_ready(speech_mode):
                 return self.send({'error':'Transkription noch nicht installiert. Aufnahme ist gespeichert. Auf dem Laptop: bash setup.sh'},code=409)
             with connect() as c:
                 pending = c.execute("SELECT COUNT(*) FROM recordings WHERE status IN ('queued','processing','analyzing')").fetchone()[0]

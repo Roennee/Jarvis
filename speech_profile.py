@@ -21,3 +21,7 @@ def word_errors(reference,hypothesis):
         for j,b in enumerate(hyp,1):row.append(min(row[-1]+1,previous[j]+1,previous[j-1]+(a!=b)))
         previous=row
     return previous[-1],len(ref)
+
+def profile_for_mode(profile,mode):
+    # A personal acoustic model must not replace the general recognizer for other speakers.
+    return 'swiss' if mode=='silent' and profile=='personal' else profile
