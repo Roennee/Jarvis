@@ -35,7 +35,7 @@ def clean_audio(source,target):
         with wave.open(str(raw),'rb') as stream:
             if stream.getnframes()/stream.getframerate()>600:raise ValueError('Rauschfilter unterstützt höchstens 10 Minuten. Original verwenden.')
             while True:
-                chunk=stream.readframes(1600)
+                chunk=stream.readframes(320)
                 if not chunk:break
                 values=array.array('h',chunk)
                 if sys.byteorder!='little':values.byteswap()
@@ -43,8 +43,8 @@ def clean_audio(source,target):
         # Quiet gaps anchor the estimate. Do not apply spectral subtraction to a
         # clean signal: it can remove quiet consonants and degrade recognition.
         if not levels:raise ValueError('Keine Audiosamples gefunden. Original bleibt erhalten.')
-        levels.sort();floor=20*math.log10(max(levels[len(levels)//5],1e-9))
-        if floor < -55:
+        levels.sort();floor=20*math.log10(max(levels[len(levels)//20],1e-9))
+        if floor < -45:
             raw.replace(target);return
         noise_floor=max(-50,min(-25,floor+3))
         result=subprocess.run([binary,'-nostdin','-v','error','-y','-i',str(raw),'-af',

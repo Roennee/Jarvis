@@ -40,7 +40,8 @@ auch die Gerätenamen sichtbar. Bei starkem Rauschen USB-/Headset-Mikrofon mit d
 internen Mikrofon vergleichen. Jarvis spielt das Mikrofon nicht live ab.
 
 Der neue FFmpeg-Filter schätzt zuerst den Hintergrundpegel aus leisen Abschnitten.
-Bei sehr geringem Pegel wird die spektrale Filterung ausgelassen. Bei Rauschen
+Zwanzig-Millisekunden-Fenster erkennen auch kurze Sprechpausen; bei einem
+Hintergrundpegel unter −45 dBFS wird die spektrale Filterung ausgelassen. Bei Rauschen
 reduziert er lokal Störungen (80-Hz-Hochpass, Tiefpass,
 spektrale Unterdrückung). Keine automatische Lautheitsanhebung. Vor der ASR wird
 nur eine temporäre Kopie verarbeitet. In der Browser-Vorschau kann das Original
