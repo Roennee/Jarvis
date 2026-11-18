@@ -1,13 +1,14 @@
-# Jarvis UI 0.2
-Python 3.12 und Ollama mit qwen3:1.7b benötigt. Keine Zusatzpakete.
-Lokal: python3 server.py
-Mit Tailscale: bash start.sh
-In anderem Terminal: sudo tailscale serve --bg http://127.0.0.1:8765
-Die HTTPS-Freigabe bei Aufforderung über den von Tailscale ausgegebenen Link aktivieren. Nur Serve verwenden, kein Funnel. Zugriff wird über das private Tailscale-Netz geregelt; alle laut dessen Zugriffsregeln berechtigten Teilnehmer können die App nutzen. Keine zusätzliche App-Anmeldung.
-Zum Deaktivieren: sudo tailscale serve reset
-Notizen liegen in jarvis.sqlite3. Beim Update nur Programmdateien ersetzen, Datenbank behalten. Chat bleibt nur im offenen Tab. Keine Sprachaufnahme, Kalenderanbindung, Trades oder automatischen Modellupdates. Standard-Testmodell, keine verifizierte Abliteration.
+# Jarvis · lokaler persönlicher Assistent
 
-## Installation über GitHub
+Version **0.9.0**, für Linux Mint, Python 3.12, 8 GB RAM und Pixel mit Tailscale.
+
+## Assistent-Update
+
+Android **0.5.0**: native Aufnahme, Kalenderauswahl und Einrichtungsdialog für die
+Zuhörkachel. Web: lokaler Rauschfilter, spulbare Audioantworten, Gratis-Cloud und
+wöchentliche Modellprüfung. [Einrichtung und Gerätetest](docs/assistant-setup.md).
+
+## Start
 
 ```bash
 git clone https://github.com/Roennee/Jarvis.git ~/Jarvis
@@ -15,22 +16,147 @@ cd ~/Jarvis
 bash start.sh
 ```
 
-Voraussetzung: Tailscale ist angemeldet. Ohne Tailscale lokal mit `python3 server.py` starten.
+Lokal: http://127.0.0.1:8765. Handy: die vom Startskript angezeigte Tailscale-HTTPS-Adresse. Die bestehende Freigabe `sudo tailscale serve --bg http://127.0.0.1:8765` bleibt bestehen. Kein Funnel, keine Portfreigabe. Zugriff wird durch die Tailscale-Netzwerkregeln geregelt; keine zusätzliche App-Anmeldung. Nur eigene/berechtigte Geräte ins Netz aufnehmen.
 
-## Updates
+## Von 0.2 / 0.3 aktualisieren
 
-Server mit Strg+C stoppen. Im Repository:
+Manuellen Server mit Strg+C stoppen, dann:
 
 ```bash
+cd ~/Jarvis
 git pull --ff-only
+bash setup.sh
 bash start.sh
 ```
 
-SQLite-Datenbank und private Konfigurationen sind nicht Teil von Git. Bei Umstieg aus dem ZIP die Datei `jarvis.sqlite3` bei gestopptem alten Server in den neuen Repository-Ordner kopieren. Bestehende Datenbank nicht überschreiben. Vor Updates eine Sicherung der Datenbank ausserhalb des Repositorys anlegen.
+`setup.sh` installiert lokale Sprachausgabe (Piper mit Thorsten-Stimme, eSpeak NG als Fallback), lokale Transkription (faster-whisper mit Base-Modell) und ICS-Import. Dafür werden beim ersten Lauf Pakete und Modellgewichte heruntergeladen. Danach transkribiert der Worker mit deaktiviertem Netzwerkdownload. Anschliessend lädt `setup-model.sh` den abliterated Kandidaten `huihui_ai/qwen3-abliterated:1.7b` (ca. 1,1 GB) und wählt ihn nur, wenn zwei einfache Antworttests bestehen. Bei fehlgeschlagenen Tests bleibt die alte Auswahl bestehen. Ohne Setup funktionieren Chat, Notizen, Aufgaben, Trainings-/Depotimport und Kalenderplanung weiterhin. Eine fehlende Erweiterung wird im Dashboard angezeigt.
 
-## Stand und nächste Schritte
+Auf Laptop mit Strg+Umschalt+R neu laden. Auf Pixel gegebenenfalls Tab schliessen und erneut öffnen. Vor der ersten Schemaerweiterung wird die bestehende Datenbank automatisch gesichert. Die Datenbank wird erweitert, bestehende Notizen bleiben erhalten.
 
-0.2: lokale UI, Ollama-Chat, Notizen in SQLite, konfigurierter privater Tailscale-HTTPS-Zugriff.
-Offen: Audioaufnahme und lokale Transkription, Pixel-Sperrbildschirmzugriff, persistente Chats, Google/Outlook OAuth, Trainings- und Depotdaten, Bees-Anbindung sowie geprüfte Modellupdates und Auswahl eines abliterated Modells.
+## Was funktioniert
 
-Modellupdates sind getrennt von Programmupdates; `git pull` lädt keine neuen Modellgewichte. Keine Cloud-KI wird automatisch hinzugefügt. Repository enthält keine persönlichen Kalender- oder Finanzdaten und keine Zugangsdaten.
+- Responsive UI, Übersicht, Status und Handy-Navigation.
+- Chats und Notizen dauerhaft in SQLite; Notizensuche, optional letzte drei Notizen als Modellkontext. Das Modell führt keine Werkzeuge selbst aus.
+- Aufgaben mit Fälligkeit und Erledigt-Status.
+- Mikrofonaufnahme im Browser bis zwei Minuten, Vorschau, lokaler Download und Upload. Audio bleibt nach Upload auf dem Laptop.
+- Lokale Transkription als Hintergrundauftrag. Danach Text prüfen, korrigieren und als Notiz speichern. Original/Korrektur werden aufbewahrt; kein automatisches Sprachtraining.
+- Geräte-TTS nur für Stimmen mit `localService=true`; Piper als lokale neuronale Serverstimme mit Player; eSpeak als einfacher Fallback. Keine Fish-Audio-Anbindung. Fallback klingt synthetisch, keine zugesagte natürliche Wunschstimme. Im synthetischen Sprachtest wurden einzelne Wörter falsch erkannt; Transkripte deshalb immer prüfen, besonders Zeiten, Namen und Schweizerdeutsch.
+- Lokale Termine und Import von Google-/Outlook-ICS-Dateien; wiederkehrende Einträge im Fenster letzte 30 bis nächste 370 Tage. Alle Zeiten werden in Europe/Zurich angezeigt. Wiederimport dedupliziert erkannte Termine, löscht aber keine entfernten Termine. Google/Outlook zusätzlich als Leseadapter nach Kontoeinrichtung (manueller Abruf, keine Schreibaktionen).
+- Training manuell und CSV-Import. Depot-Snapshots als CSV, Historie und Summen je Währung. Keine Livekurse, keine Währungsumrechnung.
+- Bees liest gespeicherte Equity-/Gebühren-/Kapitalfelder aus `~/trading-experiment/data/live_bees/state.json`, ohne Trading-Code auszuführen. Nur ausgewählte Felder werden angezeigt; kein Schlüsselzugriff. Optionaler Pfad per `JARVIS_BEES_DIR`. Zusätzliche JSON-Berichte bleiben als Momentaufnahmen erhalten. Keine Kraken-Anbindung oder Trades.
+- SQLite-Onlinebackup und Datenexport als JSON. Die Audio-Dateien sind im JSON-Export nicht enthalten.
+- Konfiguration des installierten Ollama-Modells. CPU-intensive KI-Aufgaben werden serialisiert.
+
+## Update und Betrieb
+
+```bash
+bash update.sh
+```
+
+Sichert die Datenbank und holt Code mit Fast-Forward. Bei geändertem Code bricht es ab. Ein laufender systemd-Benutzerdienst wird neu gestartet; manuelle Server danach selbst neu starten. Neue Abhängigkeiten bei Bedarf mit `bash setup.sh` installieren.
+
+```bash
+bash install-service.sh
+# Nach Stop des manuellen Servers:
+systemctl --user start jarvis
+systemctl --user status jarvis
+journalctl --user -u jarvis -n 50
+```
+
+Der Dienst startet bei Anmeldung. Für Start beim Systemboot ohne Benutzeranmeldung optional `sudo loginctl enable-linger "$USER"` einrichten. Gerät muss wach bleiben; Suspend kann diese App nicht verhindern.
+
+Für Modellupdates getrennt vom Code:
+
+```bash
+# Server vorher stoppen, auch manuelle Instanz.
+bash model-update.sh
+```
+
+Sichert den bisherigen Modelltag lokal, lädt den gewählten Tag neu und prüft eine Antwort. Bei technischem Fehler wird der alte Tag wiederhergestellt. Die Qualität ist zusätzlich anhand der gedruckten Testantwort zu prüfen. Der optionale lokale Wochentimer wird durch `install-service.sh` vorbereitet. Aktivierung: `systemctl --user enable --now jarvis-model-update.timer`. Er aktualisiert sonntags um 04:00 Systemzeit (oder beim nächsten Start) nur den bereits gewählten Modelltag, mit technischem Test und Rückfallkopie. Er stoppt/startet dafür den Jarvis-Benutzerdienst kurzzeitig. Neue Modellfamilien und abliterated Varianten werden noch nicht automatisch ausgewählt. Technischer Test ist kein Nachweis besserer Antwortqualität. UI „Modellstand protokollieren“ erfasst nur installierte Stände, kein Online-Updatecheck.
+
+## Daten und Privatsphäre
+
+`jarvis.sqlite3` (inklusive Chatverläufen, persönlichen Einstellungen), `recordings/`, `backups/` und `models/` bleiben lokal und sind von Git ausgeschlossen. Datenbank und Audio regelmässig ausserhalb dieses Rechners sichern. Keine Tokens oder persönlichen Exporte ins öffentliche Repository legen. Aufnahme nur bewusst starten. Auf dem Pixel kann die Aufnahme beim Sperren der Seite unterbrochen werden; nicht als Hintergrundrekorder benutzen.
+
+## Noch nicht fertig / benötigt Einrichtung
+
+- **Native Pixel-Aufnahme aus dem Sperrbildschirm:** Android-MVP-Quellcode unter `android/` mit Kachel, Foreground-Service und lokalem Upload. APK-Build in GitHub Actions erfolgreich; noch kein Gerätetest. Kachel fordert bei Bedarf Entsperren an. Webaufnahme ersetzt die App nicht.
+- **Google privat / Outlook geschäftlich:** Leseadapter sind implementiert, brauchen aber OAuth-App-Konfiguration und Kontofreigaben. Noch kein Test gegen persönliche Konten. ICS-Import funktioniert ohne Kontoanmeldung. Siehe `docs/integrations.md`.
+- **Schweizerdeutsch:** Base-Modell und persönliches Glossar sind ein Startpunkt, keine garantierte Dialekterkennung. Korrekturbeispiele können später als Datengrundlage dienen.
+- **Stimme:** Lokale Piper-Stimme installiert und als WAV-Synthese im Entwicklungsumfeld geprüft. Klang und Geschwindigkeit am Surface/Pixel noch zu prüfen. Kein eigenes Stimmtraining.
+- **Abliterated-Modell:** Kleine huihui-Qwen3-Variante als Installationskandidat vorbereitet; auf dem Nutzer-Laptop noch nicht geprüft. Zwei einfache Setup-Tests ersetzen keine umfassende Qualitätsprüfung. Der optionale Update-Timer aktualisiert nur diesen gewählten Tag und nimmt keine neue Modellwahl vor.
+- **Bees:** Leseadapter für die verifizierten Felder des aktuellen Repositoryschemas ist vorbereitet; reale lokale Datei am Surface noch zu prüfen. Keine neue Bewertung, kein Watcherstatus, kein Trading-Zugriff.
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Integrationstests verwenden eine temporäre Datenbank und eine simulierte Ollama-Antwort. Sie handeln nicht und rufen keine privaten Dienste auf. Reale Audio-/Dialektqualität und Pixel-Sperrbildschirmverhalten müssen am Gerät getestet werden.
+
+Modellquelle: https://ollama.com/huihui_ai/qwen3-abliterated:1.7b — Community-Variante laut Modellkarte per Abliteration abgeleitet, kein Versprechen über Antwortqualität.
+
+Optionaler echter Sprach-Pipelinetest nach Setup: `.venv/bin/python tests/speech_roundtrip.py`. Er erzeugt synthetisches Deutsch mit Piper, lädt die WAV lokal hoch, verarbeitet sie mit dem Offline-Whisper-Worker und speichert das Transkript in einer temporären Testdatenbank. Kein Test persönlicher Aufnahmen.
+
+
+## v0.5: Gesprächsprotokolle
+Nach der lokalen Transkription erzeugt Ollama automatisch ein Protokoll unter Notizen & Protokolle: Titel, Themenkategorie, Zusammenfassung, wichtige Punkte, Entscheidungen, offene Fragen und Aufgabenvorschläge mit Quellzitat. Originaltranskripte bleiben erhalten. Aufgaben werden einzeln übernommen; erneutes Tippen legt dieselbe Aufgabe nicht doppelt an. Termine und Verantwortliche bleiben Textangaben und werden nicht als bestätigte Kalenderdaten behandelt.
+
+Die automatische Analyse benötigt das konfigurierte lokale Modell. Bei Fehlern bleibt das Transkript erhalten; über Transkript prüfen lässt sich die Analyse wiederholen. Maximal 10000 Zeichen pro Analyse. Die inhaltliche Qualität und Laufzeit des kleinen Modells müssen auf dem Surface geprüft werden. Die bestehende Android-App benötigt für diese Serverfunktionen kein neues APK.
+
+### v0.5.1: Ablage und Aufgabenprüfung
+Titel und Themen können bearbeitet, Einträge angeheftet und archiviert beziehungsweise wiederhergestellt werden. Protokolle lassen sich kopieren. Aufgaben werden vor der Übernahme mit Text, verantwortlicher Person und einem explizit ausgewählten Datum geprüft. Quellzitate bleiben sichtbar. Wiederholte Übernahme bleibt auch dann ohne Duplikat, wenn eine erneute Analyse die Reihenfolge der Vorschläge verändert. Die Oberfläche zeigt die KI-Analyse als eigenen Verarbeitungsstatus.
+
+
+## v0.6: Sprachaktionen (Android-Prototyp v0.2)
+Zwei explizit gestartete Mikrofon-Sitzungen: lokales englisches Hey-Jarvis-Wakeword und stilles Mitschreiben. Neue Sprachdateien werden nach Offline-Transkription als Notiz, lokaler Termin, Antwort oder keine Aktion verarbeitet. Stiller Modus erzeugt keine Audioantwort. Ausgeführte Aktionen sind je Aufnahme idempotent. Unklare Terminangaben landen als Klärungsnotiz. Mehr unter `android/README.md`. Server-Update allein aktualisiert die APK nicht. Gerätetest und Akkumessung stehen aus.
+
+Android v0.2.1 stellt die bisherige Dashboard-Oberfläche als App-Startseite wieder her. Sprachsteuerung sitzt im bestehenden Bereich Transkripte; native Einrichtung ist eine untergeordnete Ansicht.
+
+
+## v0.7 / Android v0.4: Gespräch und Stillmodus
+Im Gespräch werden relevante Notizen, Aufgaben und Termine zunächst als Vorschlag gespeichert. Bestätigung/Verwerfen ist in der Themenübersicht oder per eindeutigem Ja/Nein innerhalb derselben laufenden Sprachsitzung möglich. Der Stillmodus erstellt relevante Notizen und konkrete Aufgaben/Termine unmittelbar. Offene Aufgaben mit identischem Text werden wiederverwendet. Aufgaben-Fälligkeiten bleiben als Terminhinweis erhalten, wenn kein verifiziertes Datum vorliegt.
+
+Notizen öffnen mit Themenkacheln statt einer endlosen Liste; je Thema werden zwölf Einträge pro Seite gezeigt. Sprechen ist der Hauptbereich, die explizite Transkriptfunktion ist eingeklappt. Nach erfolgreicher Verarbeitung werden vollständiger Spracheingabetext und Audio auf dem Server standardmässig gelöscht; Vorschläge und Quellzitate der extrahierten Inhalte bleiben erhalten. Bei explizitem Transkriptwunsch wird Text/Audio aufbewahrt. Fehlgeschlagene Eingaben bleiben zur Wiederholung erhalten. Bereits vorhandene alte Aufnahmen/Transkripte werden nicht gelöscht. Kurzfristiger Dialogkontext bleibt im RAM (letzte vier Runden, maximal 50 Sitzungen; kein dauerhaftes Transkriptarchiv).
+
+Android bestätigt erkannte Rufwörter mit einer lokalen deutschen Gerätestimme, sofern eine Offline-Stimme verfügbar ist, sonst mit einem Ton. Nach einer Antwort läuft ein 30-Sekunden-Anschlussfenster. Jetzt sprechen ist als direkte Alternative eingebaut und benötigt kein Wakeword-Modell. Die Erkennung selbst, Lautstärke, VAD, Akkulaufzeit und die Inhalte des kleinen Ollama-Modells benötigen weiter echte Pixel-/Surface-Tests. Diese Änderung belegt nicht, dass die vorherige Erkennungsstörung am Gerät behoben ist.
+
+
+## v0.7.1 / Android v0.4.1: kürzere Gesprächspausen
+Im Gespräch wird eine Äusserung nach einer Sekunde Stille abgeschlossen (Stillmodus weiter 1,8 Sekunden). Ergebnisse werden anfangs alle 0,5 Sekunden statt alle drei Sekunden abgefragt. Nach 2,6 Sekunden ausstehender Verarbeitung sagt eine verfügbare Offline-Gerätestimme einmal „Lass mich kurz nachdenken“; schnelle Antworten und Stillmodus lösen keinen Wartehinweis aus. Abgeschlossene/gestoppte Runden können keinen verspäteten Hinweis mehr sprechen. Standardmässig werden Antworten direkt auf dem Pixel mit der Offline-Stimme gesprochen; unter Sprache einrichten lässt sich die bisherige Serverstimme wieder auswählen. Fehlt die Offline-Stimme, bleibt die Serverstimme als Fallback.
+
+Für reine Gesprächsantworten fordert der Prompt nur action/reply statt ausführlicher Metadaten und begrenzt die gesprochene Antwort auf zwei Sätze. Aufgaben bleiben auf fünf Vorschläge je Äusserung begrenzt; Notiz-/Terminbestätigungen bleiben erhalten. Die Sprachaktionen zeigen nun Messwerte für Vorbereitung, Spracherkennung und KI-Verarbeitung. Die Werte messen Serverzeit, nicht die gesamte gefühlte Antwortzeit inklusive Mobilfunk und Wiedergabe. Keine Behauptung einer gemessenen Beschleunigung am Surface; diese ist am Gerät zu prüfen. Kein neuer Cloud-Dienst und keine automatische Online-Übertragung.
+
+
+Android-Update-Signierung: Einmal `bash setup-android-signing.sh` auf dem Laptop ausführen (GitHub CLI muss angemeldet sein). Der private Schlüssel bleibt ausserhalb von Git und wird als verschlüsseltes GitHub Actions Secret verwendet. Ohne Signierungs-Secrets gibt CI keine neue APK mehr aus. Details und Sicherungshinweise: android/README.md.
+
+
+## v0.8: Schweizerdeutsch und persönlicher Lernablauf
+Die aktuelle Regel ersetzt die frühere automatische Ablage: In BEIDEN Sprachmodi entstehen nur Vorschläge. Aufgaben, Termine und Notizen werden erst nach Annehmen in die eigentliche Ablage übernommen. Stillmodus bleibt lautlos. Abgelehnte Vorschläge werden nicht ausgeführt.
+
+Schweizerdeutscher ASR-Kandidat: `gcoli/whisper-large-v3-turbo-swiss-german-mit`, fixierter Stand `540fb2e7a9135048963c5de9822579c96f8962e5`, CT2-Unterordner, laut Modellkarte MIT. Das Modell übersetzt gesprochenen Dialekt in Standarddeutsch. Die Modellkarte weist darauf hin, dass spontane Gespräche/noisy Audio nicht gemessen wurden; deren Qualität auf dem Surface ist offen. Modell: https://huggingface.co/gcoli/whisper-large-v3-turbo-swiss-german-mit
+
+Nach Installation der bestehenden Python-Umgebung: `python setup-swiss-speech.py --activate`. Der Download erfolgt nur auf ausdrücklichen Start dieses Skripts, nicht beim normalen Sprechen. Grosser Download und zusätzliche CPU-/RAM-Last; keine Garantie schneller Antworten auf 8 GB RAM. Danach Jarvis neu starten. Bei Bedarf unter Einstellungen auf das vorherige kleine Sprachprofil zurückwechseln. Keine externen Audiodienste aktiviert.
+
+### Persönlich lernen
+Unter Sprechen im aufgeklappten Aufnahmebereich „Lernaufnahme: ausschliesslich meine eigene Stimme“ wählen, eine kurze eigene Aufnahme von 1–30 Sekunden aufnehmen/importieren, hochladen und verarbeiten. Im Bereich „Jarvis lernt meine Sprache“ anhören, richtigen Inhalt auf Hochdeutsch korrigieren und eigene Namen/Fachwörter bestätigen. Audio, Erkennung und Korrektur bleiben lokal; keine automatische Übernahme fremder Gesprächsstimmen. Bestätigte Wörter werden beim nächsten Erkennen als Prompt-Hilfe genutzt. Das ist lexikalische Anpassung, keine Änderung der akustischen Modellgewichte und keine garantierte Verbesserung. Löschen entfernt das Lernbeispiel und seine Aufnahme aus der Sammlung.
+
+`python train-personal-speech.py --export-only` erzeugt lokal unter `private/speech-training` train/validation-Manifeste. Für tatsächliches LoRA-Training mindestens 30 geprüfte eigene Clips und mindestens zehn unterschiedliche Sätze sammeln. Der explizit gewählte Trainingsrechner benötigt eine CUDA-GPU und `requirements-speech-training.txt`. Training: `python train-personal-speech.py`. Es läuft nicht automatisch auf dem Surface und wird nicht in eine Cloud gestartet. Der Hugging-Face-Download enthält nur öffentliche Modellgewichte; Trainingsaudio wird vom Skript nicht hochgeladen.
+
+`python evaluate-personal-speech.py` vergleicht den Kandidaten mit dem bisherigen persönlichen Modell oder Swiss-Basismodell auf zurückgehaltenen Clips. `--activate` übernimmt ihn nur bei geringerer Wortfehlerrate ohne Verschlechterung einzelner Prüfclips. Der Prüfdatensatz wird nach ausreichender Sammlung eingefroren, und identische korrigierte Sätze bleiben zwischen Training und Prüfung getrennt. Auch bestandene kleine Prüfungen garantieren keine Verbesserung in allen realen Gesprächen. GPU-Training und Schweizerdeutsch-Qualität wurden hier mangels GPU und persönlicher Sprachaufnahmen NICHT ausgeführt oder validiert. Es gibt noch kein auf Raffaels Stimme trainiertes Modell.
+
+Sprachprofile „base“, „swiss“, „personal“ bleiben auswählbar; nicht vorhandene Modelle können nicht aktiviert werden. Ein schlechtes Training wird nicht stillschweigend ausgerollt. Bereits gespeicherte frühere Notizen/Aufgaben werden durch die neue Vorschlagsregel nicht rückwirkend verändert.
+
+Ein später aktiviertes persönliches Akustikmodell gilt für Gespräche mit Jarvis. Im stillen Mehrpersonen-Zuhören wird weiterhin das allgemeine Schweizerdeutsch-Modell verwendet, damit fremde Stimmen nicht ungeprüft durch einen auf die eigene Stimme angepassten Erkenner laufen. Das ist keine automatische Sprecheridentifikation.
+
+### Kalenderübersicht & Pixel-Widget (0.9.1 / Android 0.6.0)
+
+Kalender als ruhige Tagesagenda mit Suche und Kalenderfilter, eingeklappter
+Einrichtung und lesbaren Outlook-Beschreibungen. Das grössenverstellbare schwarze
+Pixel-Widget zeigt die nächsten drei Termine und drei offenen Aufgaben.
+Startbildschirm lange drücken → Widgets → Jarvis. Neue APK installieren und die
+Pixel-Kalenderauswahl einmal neu bestätigen. Abruf ungefähr alle 30 Minuten nach
+Android-Systemplanung und manuell über ↻; Laptop und Tailscale müssen erreichbar
+sein. Offline wird der letzte Stand gekennzeichnet. Details in
+[Verbindungen](docs/integrations.md#agenda-und-pixel-widget-server-091--android-060).

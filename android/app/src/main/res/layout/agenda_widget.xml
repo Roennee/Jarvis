@@ -1,0 +1,35 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:id="@+id/agenda_root" android:orientation="vertical" android:background="#000000" android:padding="20dp">
+ <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+ <TextView android:id="@+id/agenda_heading" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:gravity="center_vertical" android:text="J A R V I S" android:textSize="18sp" android:textColor="#FFFFFF"/>
+ <TextView android:id="@+id/agenda_refresh" android:layout_width="48dp" android:layout_height="48dp" android:gravity="center" android:text="↻" android:textSize="26sp" android:textColor="#FFFFFF" android:contentDescription="Agenda aktualisieren"/>
+ </LinearLayout>
+ <TextView android:id="@+id/agenda_date" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Dein Tag" android:textColor="#999999" android:textSize="12sp" android:paddingBottom="20dp"/>
+ <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="TERMINE" android:textColor="#888888" android:textSize="11sp" android:letterSpacing="0.16"/>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_event1" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="Deine nächsten Termine" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_time1" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_event2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_time2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_event3" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_time3" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<TextView android:importantForAccessibility="no" android:layout_width="match_parent" android:layout_height="1dp" android:background="#252525" android:layout_marginTop="12dp" android:layout_marginBottom="18dp"/>
+ <TextView android:id="@+id/agenda_tasks_heading" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="AUFGABEN" android:textColor="#888888" android:textSize="11sp" android:letterSpacing="0.16"/>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_task1" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="Deine offenen Aufgaben" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_due1" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_task2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_due2" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="32dp" android:orientation="vertical" android:gravity="center_vertical">
+  <TextView android:id="@+id/agenda_task3" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="2" android:ellipsize="end" android:text="" android:textSize="16sp" android:textColor="#FFFFFF"/>
+  <TextView android:id="@+id/agenda_due3" android:layout_width="match_parent" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:textSize="11sp" android:textColor="#999999"/>
+ </LinearLayout>
+<TextView android:id="@+id/agenda_status" android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingTop="14dp" android:text="Jarvis verbinden · ↻ aktualisieren" android:textSize="10sp" android:textColor="#777777"/>
+</LinearLayout>

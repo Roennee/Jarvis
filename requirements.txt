@@ -1,0 +1,8 @@
+faster-whisper>=1.1,<2
+icalendar>=6,<8
+recurring-ical-events>=3,<4
+google-api-python-client>=2,<3
+google-auth-oauthlib>=1,<2
+msal>=1.30,<2
+av==16.1.0
+piper-tts>=1.5,<2

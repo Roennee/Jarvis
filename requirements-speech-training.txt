@@ -1,0 +1,6 @@
+# Install only on the explicitly chosen GPU training machine.
+transformers>=4.45,<5
+peft>=0.13,<1
+accelerate>=1,<2
+torch>=2.4,<3
+faster-whisper>=1.1,<2

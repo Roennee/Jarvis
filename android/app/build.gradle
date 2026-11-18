@@ -1,0 +1,37 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'ch.jarvis.companion'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'ch.jarvis.companion'
+        minSdk 29
+        targetSdk 35
+        versionCode 12
+        versionName '0.6.2'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+    }
+    signingConfigs {
+        stable {
+            if (System.getenv('JARVIS_ANDROID_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('JARVIS_ANDROID_KEYSTORE_PATH'))
+                storeType 'PKCS12'
+                storePassword System.getenv('JARVIS_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'jarvis'
+                keyPassword System.getenv('JARVIS_ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (System.getenv('JARVIS_ANDROID_KEYSTORE_PATH')) signingConfig signingConfigs.stable
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies {
+    implementation 'com.alphacephei:vosk-android:0.3.75'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+}
