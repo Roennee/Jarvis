@@ -29,10 +29,8 @@ public class AgendaWidget extends AppWidgetProvider {
         return PendingIntent.getActivity(c,request,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
     }
     static String text(String value,int max){return value.length()>max?value.substring(0,max-1)+"…":value;}
-    static String eventTime(JSONObject event){
-        ZonedDateTime a=Instant.parse(event.optString("start")).atZone(ZONE),z=Instant.parse(event.optString("end")).atZone(ZONE);
-        LocalDate today=LocalDate.now(ZONE);String day=a.toLocalDate().isBefore(today)?"Läuft":a.toLocalDate().equals(today)?"Heute":a.toLocalDate().equals(today.plusDays(1))?"Morgen":a.format(DateTimeFormatter.ofPattern("EEE d.M.",Locale.GERMAN));
-        return day+" · "+(event.optBoolean("all_day")?"Ganztägig":a.format(DateTimeFormatter.ofPattern("HH:mm"))+"–"+z.format(DateTimeFormatter.ofPattern("HH:mm")));
+    static String eventTime(JSONObject event)throws JSONException{
+        return AgendaTiming.eventTime(event.getString("start"),event.getString("end"),event.optBoolean("all_day"),Instant.now());
     }
     static void render(Context c){
         RemoteViews v=new RemoteViews(c.getPackageName(),R.layout.agenda_widget);

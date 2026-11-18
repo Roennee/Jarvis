@@ -7,7 +7,7 @@ import tempfile
 import threading
 from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -40,7 +40,7 @@ with tempfile.TemporaryDirectory() as data:
             # A failed account fetch must preserve the imported agenda.
             page.route('**/api/calendar/sync',lambda route:route.fulfill(status=409,content_type='application/json',body='{"error":"Kontoabruf nicht verfügbar"}'))
             page.locator('.agenda-settings').nth(1).locator('summary').first.click();page.locator('#syncOutlook').click()
-            page.wait_for_function("document.getElementById('agendaStatus').textContent.includes('bleiben sichtbar')")
+            expect(page.locator('#agendaStatus')).to_contain_text('bleiben sichtbar')
             assert page.locator('.agenda-event').count()==3
             assert not errors,errors
             browser.close();print('Desktop/Pixel: filters, safe details, failed sync retention, form, no overflow or JS errors passed.')
