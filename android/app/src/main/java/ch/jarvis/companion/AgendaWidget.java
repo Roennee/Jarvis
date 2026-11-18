@@ -59,8 +59,8 @@ public class AgendaWidget extends AppWidgetProvider {
                 footer="Stand "+stamp.format(DateTimeFormatter.ofPattern("d.M. HH:mm"));
                 if(!prefs.getString("error","").isEmpty())footer+=" · "+prefs.getString("error","");
                 else footer+=" · ↻ aktualisieren";
-            }else{v.setTextViewText(EVENTS[0],"Jarvis öffnen");v.setTextViewText(EVENT_TIMES[0],"Tailscale und Laptop verbinden");}
-        }catch(Exception ignored){footer="Verbindung in Jarvis einrichten";}
+            }else{v.setTextViewText(EVENTS[0],"Jarvis öffnen");v.setTextViewText(EVENT_TIMES[0],"Tailscale und Laptop verbinden");v.setTextViewText(TASKS[0],"Aufgaben nach Verbindung verfügbar");}
+        }catch(Exception ignored){footer="Verbindung in Jarvis einrichten";v.setTextViewText(EVENTS[0],"Jarvis öffnen");v.setTextViewText(EVENT_TIMES[0],"Verbindung einrichten");v.setTextViewText(TASKS[0],"Aufgaben nach Verbindung verfügbar");}
         v.setViewVisibility(R.id.agenda_date,compact?android.view.View.GONE:android.view.View.VISIBLE);
         int padding=(int)((compact?12:20)*c.getResources().getDisplayMetrics().density);
         v.setViewPadding(R.id.agenda_root,padding,padding,padding,padding);
