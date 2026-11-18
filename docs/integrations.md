@@ -54,3 +54,55 @@ Browser: Seite offen und entsperrt halten. Android-Prototyp unter `android/`: Qu
 5. Mobilfunk, Netzunterbrechung und lokaler Audiodownload prüfen.
 6. Kalenderanmeldung und Termine gegen Originalkalender vergleichen.
 7. Android-App: Kachel, Mikrofonfreigabe, Sperren, Stoppen und Upload testen.
+
+## Agenda und Pixel-Widget (Server 0.9.1 / Android 0.6.0)
+
+Der Kalender zeigt anstehende Termine nach Tagen, mit Tagesauswahl, Kalenderfilter
+und Titelsuche. Einrichtung und Terminformular sind eingeklappt. Beschreibungen
+erscheinen erst beim Öffnen eines Termins als Text; Outlook-HTML wird für die
+Anzeige bereinigt, der ursprüngliche Import bleibt erhalten. Neue Pixel-Importe
+übertragen Kalendername und Ganztagskennzeichen. Bei alten Importen dienen
+Mitternacht-zu-Mitternacht-Termine als Ganztags-Fallback. Erneut über das Pixel
+abrufen, um die expliziten Angaben zu übernehmen.
+
+Nach Installation der neuen APK in der Kalenderansicht „Schwarzes Agenda-Widget
+hinzufügen“ wählen, oder auf dem Pixel den Startbildschirm gedrückt halten →
+Widgets → Jarvis → Termine & Aufgaben. Auf einer eigenen Startseite platzieren
+und an den Rändern möglichst gross ziehen. Die nutzbare Fläche und Abstände
+bestimmt der Pixel Launcher; Systemleisten bleiben bestehen.
+
+Das schwarze Widget zeigt drei laufende/anstehende Termine und drei offene
+Jarvis-Aufgaben. Aufgaben mit Datum kommen zuerst (überfällige vor späteren),
+danach Aufgaben ohne Datum, neueste zuerst. Tippen auf Termine/Aufgaben öffnet
+die passende Jarvis-Seite; ↻ fordert einen Abruf an. Keine Aufgaben werden durch
+Tippen auf das Widget erledigt.
+
+Während mindestens ein Widget vorhanden ist, wird ein Android-Systemjob ungefähr
+alle 30 Minuten und beim Öffnen/Verlassen der App angefordert. Android kann ihn
+im Ruhemodus verschieben. Beim Abruf werden die auf dem Pixel zuletzt bestätigten
+Kalender und bereits angemeldete Google-/Microsoft-Kontokalender aktualisiert,
+danach die nächsten Termine/Aufgaben geladen. Die Pixel-Auswahl nach dem Update
+einmal erneut bestätigen. Geräteprofile und vorhandene Berechtigungen bleiben
+massgeblich. Jeder Kalender sollte nur über einen Abrufweg verbunden sein, damit
+keine doppelten Termine entstehen. Es wird keine Quelle automatisch dedupliziert.
+
+Laptop/Jarvis und Tailscale müssen für einen neuen Abruf erreichbar sein. Offline
+bleibt der letzte erfolgreiche Widget-Stand mit Zeitstempel und Offline-Hinweis
+sichtbar. Abgelaufene Termine werden bei der nächsten Widget-Darstellung
+herausgefiltert. Ein fehlgeschlagener Kalenderabruf wird im Widget als Hinweis
+angezeigt; bereits importierte Termine bleiben sichtbar. „Stand“ ist der Zeitpunkt
+des Widget-Abrufs, keine Garantie, dass ein Kalenderanbieter aktuelle Daten geliefert
+hat. Neuimporte können nur so aktuell sein wie die Android-Kalendersynchronisation.
+
+Die bis zu sechs Einträge liegen im privaten App-Speicher (nicht in Android-Backups).
+Bei Entfernen des letzten Widgets wird dieser Cache gelöscht und die Jobs beendet.
+Der Startbildschirm zeigt die gewählten Termintitel und Aufgaben offen an. Der
+Widget-Abruf führt keine KI-, Mikrofon-, Handels- oder Kalender-Schreibaktionen aus.
+
+Validierung: Python-Projektions- und HTTP-Tests prüfen Rohdaten-Erhalt, HTML-Text,
+Ganztagsmetadaten, sichere fehlgeschlagene Imports, Zeitgrenzen und begrenzte
+Widget-Daten. JavaScript-Tests prüfen Zurich-Daten und Filter. Ein Browser-Check
+mit synthetischen Terminen prüft Desktop/Pixel-Layouts und Fehlerzustände; die
+Android-Pipeline kompiliert die APK und führt vorhandene Java-Tests aus. Ein echter
+Pixel-Test von Launcher-Grösse, Kalenderberechtigungen, Offlinebetrieb und
+Android-Hintergrundplanung bleibt nach der Installation erforderlich.

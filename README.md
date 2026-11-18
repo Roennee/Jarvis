@@ -149,3 +149,14 @@ Unter Sprechen im aufgeklappten Aufnahmebereich „Lernaufnahme: ausschliesslich
 Sprachprofile „base“, „swiss“, „personal“ bleiben auswählbar; nicht vorhandene Modelle können nicht aktiviert werden. Ein schlechtes Training wird nicht stillschweigend ausgerollt. Bereits gespeicherte frühere Notizen/Aufgaben werden durch die neue Vorschlagsregel nicht rückwirkend verändert.
 
 Ein später aktiviertes persönliches Akustikmodell gilt für Gespräche mit Jarvis. Im stillen Mehrpersonen-Zuhören wird weiterhin das allgemeine Schweizerdeutsch-Modell verwendet, damit fremde Stimmen nicht ungeprüft durch einen auf die eigene Stimme angepassten Erkenner laufen. Das ist keine automatische Sprecheridentifikation.
+
+### Kalenderübersicht & Pixel-Widget (0.9.1 / Android 0.6.0)
+
+Kalender als ruhige Tagesagenda mit Suche und Kalenderfilter, eingeklappter
+Einrichtung und lesbaren Outlook-Beschreibungen. Das grössenverstellbare schwarze
+Pixel-Widget zeigt die nächsten drei Termine und drei offenen Aufgaben.
+Startbildschirm lange drücken → Widgets → Jarvis. Neue APK installieren und die
+Pixel-Kalenderauswahl einmal neu bestätigen. Abruf ungefähr alle 30 Minuten nach
+Android-Systemplanung und manuell über ↻; Laptop und Tailscale müssen erreichbar
+sein. Offline wird der letzte Stand gekennzeichnet. Details in
+[Verbindungen](docs/integrations.md#agenda-und-pixel-widget-server-091--android-060).

@@ -1,0 +1,7 @@
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="280dp" android:minHeight="480dp"
+    android:minResizeWidth="250dp" android:minResizeHeight="420dp"
+    android:targetCellWidth="4" android:targetCellHeight="5"
+    android:updatePeriodMillis="1800000" android:initialLayout="@layout/agenda_widget"
+    android:previewLayout="@layout/agenda_widget" android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"/>

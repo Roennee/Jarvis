@@ -53,6 +53,22 @@ class WorkspaceTests(unittest.TestCase):
     def data(self,path,body=None):
         status,data,_=self.req(path,body);self.assertEqual(status,200,data);return json.loads(data)
 
+    def test_agenda_widget_projection_preserves_raw_import_and_metadata(self):
+        from datetime import datetime,timedelta
+        day=datetime.now(self.app.ZURICH).date()+timedelta(days=10)
+        event={'id':'agenda-projection-test','title':'Projekttermin','start':str(day)+'T00:00:00+01:00','end':str(day+timedelta(days=1))+'T00:00:00+01:00','all_day':True,'calendar':'Firmenkalender','details':'<html><body><p>Raum 2 &amp; Planung</p></body></html>'}
+        self.data('/api/calendar/device',{'events':[event]})
+        raw=next(e for e in self.data('/api/events') if e['title']=='Projekttermin')
+        self.assertIn('<html>',raw['details'])
+        projected=next(e for e in self.data('/api/agenda') if e['id']==raw['id'])
+        self.assertEqual(projected['details'],'Raum 2 & Planung');self.assertTrue(projected['all_day']);self.assertEqual(projected['calendar'],'Firmenkalender')
+        snapshot=self.data('/api/widget');self.assertLessEqual(len(snapshot['events']),3);self.assertLessEqual(len(snapshot['tasks']),3)
+        self.assertTrue(all('details' not in e for e in snapshot['events']))
+        self.assertEqual(self.req('/agenda.js')[0],200)
+        invalid=dict(event,all_day='yes')
+        self.assertEqual(self.req('/api/calendar/device',{'events':[invalid]})[0],400)
+        self.assertEqual(raw,next(e for e in self.data('/api/events') if e['id']==raw['id']))
+
     def test_calendar_question_uses_connected_agenda(self):
         from datetime import datetime,timedelta
         date=datetime.now(self.app.ZURICH).date()+timedelta(days=1)
@@ -215,7 +231,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_01_migration(self):
         self.assertTrue(any('Bestehende' in n['body'] for n in self.data('/api/notes')))
         self.assertTrue(list((Path(self.tmp.name)/'backups').glob('*.sqlite3')))
-        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],11)
+        with self.app.connect() as c:self.assertEqual(c.execute('PRAGMA user_version').fetchone()[0],12)
 
     def test_assets(self):
         for path in ['/','/app.js','/style.css','/icon.svg','/manifest.webmanifest']:

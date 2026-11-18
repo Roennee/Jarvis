@@ -30,6 +30,7 @@ from voice_actions import decide as decide_voice
 from speech_profile import model_path as speech_model_path, ready as speech_ready, prompt as speech_prompt, profile_for_mode
 from audio_tools import byte_range, clean_audio
 import model_hub
+import agenda
 
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('JARVIS_DATA_DIR', str(ROOT))).resolve()
@@ -49,7 +50,7 @@ MODEL_LOCK = threading.Lock()
 CALENDAR_LOCK = threading.Lock()
 JOBS = queue.Queue()
 ZURICH = ZoneInfo('Europe/Zurich')
-VERSION = '0.9.0'
+VERSION = '0.9.1'
 CATALOG_LOCK = threading.Lock()
 AUDIO_LOCK = threading.Lock()
 BEES_ROOT = Path(os.environ.get('JARVIS_BEES_DIR', str(Path.home()/'trading-experiment'))).resolve()
@@ -66,7 +67,7 @@ def init():
     if DB.exists():
         with connect() as previous:
             old_version=previous.execute('PRAGMA user_version').fetchone()[0]
-        if old_version < 11:
+        if old_version < 12:
             backup()
     with connect() as c:
         c.executescript('''
@@ -76,6 +77,7 @@ def init():
         CREATE TABLE IF NOT EXISTS chats(id TEXT PRIMARY KEY,title TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS messages(id INTEGER PRIMARY KEY,chat_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,title TEXT NOT NULL,start TEXT NOT NULL,end TEXT NOT NULL,source TEXT NOT NULL,details TEXT DEFAULT '');
+        CREATE TABLE IF NOT EXISTS event_meta(event_id TEXT PRIMARY KEY,all_day INTEGER NOT NULL,calendar_name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS training(id INTEGER PRIMARY KEY,day TEXT NOT NULL,title TEXT NOT NULL,plan TEXT DEFAULT '',result TEXT DEFAULT '');
         CREATE TABLE IF NOT EXISTS holdings(id INTEGER PRIMARY KEY,symbol TEXT NOT NULL,quantity REAL NOT NULL,price REAL NOT NULL,currency TEXT NOT NULL,created TEXT DEFAULT CURRENT_TIMESTAMP,batch TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS recordings(id TEXT PRIMARY KEY,status TEXT NOT NULL,mime TEXT NOT NULL,transcript TEXT DEFAULT '',error TEXT DEFAULT '',created TEXT DEFAULT CURRENT_TIMESTAMP);
@@ -116,7 +118,7 @@ def init():
         c.execute("CREATE TABLE IF NOT EXISTS speech_samples(recording_id TEXT PRIMARY KEY,original TEXT DEFAULT '',corrected TEXT DEFAULT '',own_voice INTEGER DEFAULT 0,words TEXT DEFAULT '',duration REAL DEFAULT 0,created TEXT DEFAULT CURRENT_TIMESTAMP)")
         if 'preprocessed' not in {r[1] for r in c.execute('PRAGMA table_info(recordings)')}:
             c.execute('ALTER TABLE recordings ADD COLUMN preprocessed INTEGER DEFAULT 0')
-        c.execute('PRAGMA user_version=11')
+        c.execute('PRAGMA user_version=12')
 
 
 def rows(sql, args=()):
@@ -555,7 +557,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             path = urlsplit(self.path).path
             q = parse_qs(urlsplit(self.path).query)
-            assets = {'/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'), '/icon.svg': ('icon.svg','image/svg+xml')}
+            assets = {'/': ('index.html', 'text/html; charset=utf-8'), '/agenda.js': ('agenda.js', 'text/javascript; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8'), '/manifest.webmanifest': ('manifest.webmanifest', 'application/manifest+json'), '/icon.svg': ('icon.svg','image/svg+xml')}
             if path in assets:
                 filename, mime = assets[path]
                 return self.send((ROOT/filename).read_bytes(), mime)
@@ -590,6 +592,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(rows('SELECT * FROM chats ORDER BY created DESC,rowid DESC LIMIT 200'))
             if path == '/api/messages':
                 return self.send(rows('SELECT * FROM messages WHERE chat_id=? ORDER BY id LIMIT 1000', (q.get('chat',[''])[0],)))
+            if path in ('/api/agenda','/api/widget'):
+                event_rows=rows('SELECT * FROM events')
+                meta={r['event_id']:r for r in rows('SELECT * FROM event_meta')}
+                if path=='/api/widget':
+                    return self.send(agenda.widget(event_rows,rows('SELECT * FROM tasks WHERE done=0'),meta))
+                return self.send(agenda.events(event_rows,meta))
             if path == '/api/events':
                 return self.send(rows('SELECT * FROM events ORDER BY start LIMIT 3000'))
             if path == '/api/training':
@@ -720,14 +728,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/calendar/device':
             entries=b.get('events')
             if not isinstance(entries,list) or len(entries)>3000:raise ValueError('Kalenderliste ungültig oder zu gross')
-            prepared=[]
+            prepared=[];metadata=[]
             for e in entries:
                 identity=text(e,'id',150);begin=local_time(text(e,'start',80));end=local_time(text(e,'end',80))
                 if end<=begin:raise ValueError('Terminende ungültig')
-                prepared.append((hashlib.sha256(('Pixel:'+identity).encode()).hexdigest(),text(e,'title',500),begin,end,'Pixel Kalender',text(e,'details',1000,False)))
+                eid=hashlib.sha256(('Pixel:'+identity).encode()).hexdigest()
+                prepared.append((eid,text(e,'title',500),begin,end,'Pixel Kalender',text(e,'details',1000,False)))
+                if 'all_day' in e:
+                    if type(e['all_day']) is not bool:raise ValueError('Ganztagsangabe ungültig')
+                    metadata.append((eid,int(e['all_day']),text(e,'calendar',200,False) or 'Pixel Kalender'))
             with connect() as c:
+                c.execute("DELETE FROM event_meta WHERE event_id IN (SELECT id FROM events WHERE source='Pixel Kalender')")
                 c.execute("DELETE FROM events WHERE source='Pixel Kalender'")
                 c.executemany('INSERT INTO events VALUES(?,?,?,?,?,?)',prepared)
+                c.executemany('INSERT INTO event_meta VALUES(?,?,?)',metadata)
             write_setting('pixel_calendar_sync',now())
             return self.send({'ok':True,'count':len(prepared)})
         if path == '/api/protocols':

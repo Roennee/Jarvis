@@ -100,3 +100,25 @@ müssen auf dem echten Gerät verglichen werden; CI kann sie nicht nachweisen.
 Native Aufnahme aus derselben Web-Oberfläche, explizite Kalenderauswahl und
 Sperrbildschirm-Kachel hinzufügen: [Einrichtung](../docs/assistant-setup.md).
 Gleicher Paketname und gleicher privater Signaturschlüssel; VersionCode 9.
+
+## Android 0.6.0 · Schwarzes Agenda-Widget
+
+Server 0.9.1 und die neue APK gemeinsam verwenden. Auf dem Pixel Startbildschirm
+lange drücken → Widgets → Jarvis → „Termine & Aufgaben“. Alternativ im
+Jarvis-Kalender „Schwarzes Agenda-Widget hinzufügen“. Auf einer eigenen Seite
+platzieren und gross ziehen. Die drei nächsten Termine und drei offenen
+Jarvis-Aufgaben werden gezeigt. Tippen auf ↻ aktualisiert, Termine/Aufgaben öffnen
+die passende Ansicht.
+
+Nach dem Update die gewünschte Pixel-Kalenderauswahl einmal erneut bestätigen.
+Solange ein Widget platziert ist, aktualisiert ein Android-Systemjob diese Auswahl
+und bereits verbundene Kontokalender ungefähr alle 30 Minuten. Tailscale und Laptop
+müssen erreichbar sein; Android darf Jobs im Ruhemodus verzögern. Offline bleiben
+Zeitstempel und letzter erfolgreicher Stand sichtbar. Kalender nie doppelt über
+Pixel und direktes Konto auswählen. Keine Mikrofon- oder KI-Aktion durch das Widget.
+
+Gerätetest: Widget hinzufügen/vergrössern, sechs Zeilen prüfen, Termin/Aufgaben
+öffnen, Aufgabe in Jarvis erledigen und ↻, Tailscale ausschalten und ↻, wieder
+verbinden, nach Neustart sowie im Ruhemodus erneut prüfen. Letztes Widget entfernen
+und prüfen, dass kein weiterer Hintergrundabruf stattfindet. Die CI kann diese
+Pixel-/Launcher-Eigenschaften nicht nachweisen.

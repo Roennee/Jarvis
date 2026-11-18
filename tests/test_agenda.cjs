@@ -1,0 +1,11 @@
+const assert=require('node:assert/strict'),a=require('../agenda.js');
+const now=new Date('2026-11-18T12:00:00Z');
+const rows=[{id:'multi',title:'Arbeit',calendar:'Work',start:'2026-11-16T23:00:00Z',end:'2026-11-19T23:00:00Z',all_day:true},{id:'timed',title:'Training',calendar:'Privat',start:'2026-11-18T17:00:00Z',end:'2026-11-18T18:00:00Z',all_day:false}];
+assert.equal(a.dayKey('2026-11-18T23:30:00Z'),'2026-11-19');
+assert.equal(a.days(now).length,7);assert.equal(a.days(now)[0].key,'2026-11-18');
+assert.equal(a.select(rows,{day:'2026-11-20',now}).length,0);
+assert.equal(a.select(rows,{day:'2026-11-19',now}).length,1);
+assert.equal(a.select(rows,{source:'Privat',query:'train',now})[0].id,'timed');
+assert.equal(a.groups(rows,now)[0][0],'2026-11-18');
+assert.match(a.range(rows[0]),/Ganztägig/);assert.match(a.time(rows[1]),/18:00/);
+console.log('Agenda: Zurich boundaries, ongoing events, exclusive all-day end, source and text filters passed.');
