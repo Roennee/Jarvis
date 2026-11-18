@@ -33,6 +33,15 @@ public class AgendaWidget extends AppWidgetProvider {
         return AgendaTiming.eventTime(event.getString("start"),event.getString("end"),event.optBoolean("all_day"),Instant.now());
     }
     static void render(Context c){
+        AppWidgetManager manager=AppWidgetManager.getInstance(c);
+        int[] widgetIds=manager.getAppWidgetIds(new ComponentName(c,AgendaWidget.class));
+        for(int id:widgetIds){
+            boolean compact=manager.getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,600)<520;
+            manager.updateAppWidget(id,views(c,compact));
+        }
+    }
+    /** The same RemoteViews packet is exercised by launcher-host runtime tests. */
+    static RemoteViews views(Context c,boolean compact){
         RemoteViews v=new RemoteViews(c.getPackageName(),R.layout.agenda_widget);
         v.setTextViewText(R.id.agenda_date,ZonedDateTime.now(ZONE).format(DateTimeFormatter.ofPattern("EEEE, d. MMMM",Locale.GERMAN)));
         v.setOnClickPendingIntent(R.id.agenda_heading,open(c,"calendar",100));v.setOnClickPendingIntent(R.id.agenda_tasks_heading,open(c,"tasks",101));
@@ -52,16 +61,12 @@ public class AgendaWidget extends AppWidgetProvider {
                 else footer+=" · ↻ aktualisieren";
             }else{v.setTextViewText(EVENTS[0],"Jarvis öffnen");v.setTextViewText(EVENT_TIMES[0],"Tailscale und Laptop verbinden");}
         }catch(Exception ignored){footer="Verbindung in Jarvis einrichten";}
-        int[] widgetIds=AppWidgetManager.getInstance(c).getAppWidgetIds(new ComponentName(c,AgendaWidget.class));
-        for(int id:widgetIds){
-            boolean compact=AppWidgetManager.getInstance(c).getAppWidgetOptions(id).getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT,600)<520;
-            v.setViewVisibility(R.id.agenda_date,compact?android.view.View.GONE:android.view.View.VISIBLE);
-            int padding=(int)((compact?12:20)*c.getResources().getDisplayMetrics().density);
-            v.setViewPadding(R.id.agenda_root,padding,padding,padding,padding);
-            for(int target:EVENTS){v.setInt(target,"setMaxLines",compact?1:2);v.setTextViewTextSize(target,android.util.TypedValue.COMPLEX_UNIT_SP,compact?15:16);}
-            for(int target:TASKS){v.setInt(target,"setMaxLines",compact?1:2);v.setTextViewTextSize(target,android.util.TypedValue.COMPLEX_UNIT_SP,compact?15:16);}
-            v.setTextViewText(R.id.agenda_status,footer);
-            AppWidgetManager.getInstance(c).updateAppWidget(id,v);
-        }
+        v.setViewVisibility(R.id.agenda_date,compact?android.view.View.GONE:android.view.View.VISIBLE);
+        int padding=(int)((compact?12:20)*c.getResources().getDisplayMetrics().density);
+        v.setViewPadding(R.id.agenda_root,padding,padding,padding,padding);
+        for(int target:EVENTS){v.setInt(target,"setMaxLines",compact?1:2);v.setTextViewTextSize(target,android.util.TypedValue.COMPLEX_UNIT_SP,compact?15:16);}
+        for(int target:TASKS){v.setInt(target,"setMaxLines",compact?1:2);v.setTextViewTextSize(target,android.util.TypedValue.COMPLEX_UNIT_SP,compact?15:16);}
+        v.setTextViewText(R.id.agenda_status,footer);
+        return v;
     }
 }

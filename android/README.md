@@ -136,3 +136,15 @@ Ein neuer instrumentierter Test läuft in CI auf Android 15 / API 35. Er prüft
 Erststart, Start mit gespeicherter Verbindung, Activity-Neuerstellung, echte
 JobScheduler-Netzwerkaufträge und abgefangene Fehler der Hintergrundplanung.
 Er ersetzt keinen Test auf dem tatsächlichen Pixel 10 Pro / Android 17.
+
+## Android 0.6.2 — Widget-Darstellung
+
+Die Widget-Trennlinie verwendete ein normales `View`, das RemoteViews nicht
+inflieren darf. Der Launcher zeigte deshalb „Widget kann nicht geladen werden“.
+Die Trennlinie ist nun ein unterstütztes TextView. Jeder Widget-Instanz wird ein
+eigenes vollständiges RemoteViews-Paket übergeben.
+
+Neue instrumentierte Tests reproduzieren die Ablehnung des alten Elements und
+prüfen tatsächliches `RemoteViews.apply`, `reapply` und `AppWidgetHostView` mit
+leerer Verbindung sowie drei langen Terminen/Aufgaben in beiden Grössen. Ein
+blosses Binden eines Widget-IDs hatte diese Darstellungsfehler nicht geprüft.
