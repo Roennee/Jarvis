@@ -122,3 +122,17 @@ Gerätetest: Widget hinzufügen/vergrössern, sechs Zeilen prüfen, Termin/Aufga
 verbinden, nach Neustart sowie im Ruhemodus erneut prüfen. Letztes Widget entfernen
 und prüfen, dass kein weiterer Hintergrundabruf stattfindet. Die CI kann diese
 Pixel-/Launcher-Eigenschaften nicht nachweisen.
+
+## Android 0.6.1 — Start mit Agenda-Widget
+
+Die Netzwerk-Jobs des Agenda-Widgets benötigen ab Android 14 die normale
+Manifest-Berechtigung `ACCESS_NETWORK_STATE`. In 0.6.0 fehlte diese Erklärung;
+bei vorhandenem Widget konnte `onResume()` deshalb mit `SecurityException`
+abbrechen. 0.6.1 ergänzt sie und begrenzt Fehler bei Planung/Aktualisierung auf
+den Hintergrundteil. Die Oberfläche bleibt geöffnet; der letzte Widget-Stand
+bleibt erhalten. Paketname, Daten und Signaturschlüssel bleiben gleich.
+
+Ein neuer instrumentierter Test läuft in CI auf Android 15 / API 35. Er prüft
+Erststart, Start mit gespeicherter Verbindung, Activity-Neuerstellung, echte
+JobScheduler-Netzwerkaufträge und abgefangene Fehler der Hintergrundplanung.
+Er ersetzt keinen Test auf dem tatsächlichen Pixel 10 Pro / Android 17.
