@@ -2,6 +2,7 @@ package ch.jarvis.companion;
 
 import android.Manifest;
 import android.app.job.*;
+import android.appwidget.*;
 import android.content.*;
 import android.content.pm.PackageManager;
 import android.view.ViewGroup;
@@ -33,6 +34,19 @@ public class StartupTest {
         launchAndCheckVisibleContent();
     }
     @Test public void firstLaunchShowsConnectionScreen(){launchAndCheckVisibleContent();}
+    @Test public void installedWidgetDoesNotCrashStartupOrResume(){
+        AppWidgetHost host=new AppWidgetHost(context,9001);
+        android.app.UiAutomation automation=InstrumentationRegistry.getInstrumentation().getUiAutomation();
+        try{
+            automation.adoptShellPermissionIdentity("android.permission.BIND_APPWIDGET");
+            int id=host.allocateAppWidgetId();
+            assertTrue(AppWidgetManager.getInstance(context).bindAppWidgetIdIfAllowed(id,new ComponentName(context,AgendaWidget.class)));
+            automation.dropShellPermissionIdentity();
+            assertTrue(AgendaWidget.exists(context));
+            launchAndCheckVisibleContent();
+            AgendaJobs.refresh(context);
+        }finally{automation.dropShellPermissionIdentity();host.deleteHost();}
+    }
     @Test public void savedConnectionOpensDashboardAndCanResume(){
         context.getSharedPreferences("voice",0).edit().putString("url","https://jarvis-runtime-test.invalid.ts.net").commit();
         try(ActivityScenario<MainActivity> scenario=ActivityScenario.launch(MainActivity.class)){
